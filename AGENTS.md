@@ -69,3 +69,19 @@ python test_simple.py             # Run basic functionality tests
 - **Pour Height**: 12.5 cm
 - **Total Brew Time**: 2:20 (140 seconds)
 - **Coffee Bean Density**: 1200 kg/m³ (medium roast)
+
+## V60 Geometry (Updated to Real Specifications)
+- **External Dimensions**: 138×115×95 mm (L×W×H)
+- **Internal Height**: 8.5 cm (excluding wall thickness)
+- **Internal Top Diameter**: 11.1 cm (excluding wall thickness)
+- **Outlet Diameter**: 0.4 cm (standard V60 hole)
+- **Cone Angle**: 64.4° (actual geometric angle)
+- **Internal Volume**: 284.4 cm³
+
+## Coffee Bed Parameters
+- **Coffee Powder Mass**: 20g (hand pour standard)
+- **Particle Count**: 493,796 particles (based on grind size distribution)
+- **Main Particle Diameter**: 0.65mm (granulated sugar size)
+- **Coffee Bed Height**: 3.3cm (58% of V60 height limit)
+- **Coffee Bed Volume**: 85.3 cm³ (30% V60 filling)
+- **Porosity**: 80.5% (realistic for medium-coarse grind)

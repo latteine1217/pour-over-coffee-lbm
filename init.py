@@ -46,12 +46,9 @@ def initialize_d3q19_simulation():
     pouring_system = PrecisePouringSystem()
     print(f"    注水系統創建完成 ({time.time()-start_time:.2f}s)")
     
-    # 5. 創建多孔介質求解器 (動態更新)
-    print("--- 設置動態多孔介質求解器 ---")
-    start_time = time.time()
-    from porous_media_3d import PorousMedia3D
-    porous_solver = PorousMedia3D(lbm_solver, particle_system)
-    print(f"    多孔介質模組創建完成 ({time.time()-start_time:.2f}s)")
+    # 5. 注意: 不再使用固定多孔介質 - 改用純顆粒系統
+    print("--- 使用純顆粒系統 (無達西定律) ---")
+    print(f"    顆粒系統已載入，無需固定多孔介質 ({time.time()-start_time:.2f}s)")
     
     # 6. 創建3D視覺化器 (支援粒子顯示)
     print("--- 創建3D視覺化器 ---")
