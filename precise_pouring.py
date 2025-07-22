@@ -90,10 +90,16 @@ class PrecisePouringSystem:
                 dy = j - pour_y
                 distance_to_pour = ti.sqrt(dx*dx + dy*dy)
                 
-                # 只在水流圓柱體內施加影響
-                if distance_to_pour <= pour_radius and k >= pour_z:
+                # 只在水流噴嘴附近的小範圍內施加影響 (3-4格的垂直範圍)
+                pour_stream_height = 4.0  # 水流噴嘴影響的垂直高度
+                if distance_to_pour <= pour_radius and k >= pour_z and k <= pour_z + pour_stream_height:
                     # 高斯分佈的水流強度 (中心最強)
                     intensity = ti.exp(-0.5 * (distance_to_pour / pour_radius)**2)
+                    
+                    # 垂直距離衰減 (離噴嘴越遠強度越低)
+                    vertical_distance = k - pour_z
+                    vertical_decay = ti.exp(-vertical_distance / 2.0)
+                    total_intensity = intensity * vertical_decay
                     
                     # 設置水相 (phi = 1 表示純水)
                     multiphase_phi[i, j, k] = 1.0
@@ -102,13 +108,13 @@ class PrecisePouringSystem:
                     lbm_rho[i, j, k] = config.RHO_WATER
                     
                     # 設置垂直向下的水流速度
-                    vertical_velocity = -self.POUR_VELOCITY * intensity * self.pour_flow_rate[None]
+                    vertical_velocity = -self.POUR_VELOCITY * total_intensity * self.pour_flow_rate[None]
                     
                     # 添加輕微的徑向分散 (更真實)
                     radial_vx = 0.0
                     radial_vy = 0.0
                     if distance_to_pour > 0:
-                        radial_factor = 0.1 * intensity  # 徑向分散強度
+                        radial_factor = 0.1 * total_intensity  # 徑向分散強度
                         radial_vx = radial_factor * dx / distance_to_pour
                         radial_vy = radial_factor * dy / distance_to_pour
                     
@@ -186,7 +192,7 @@ class PrecisePouringSystem:
                 dy = j - pour_y
                 distance = ti.sqrt(dx*dx + dy*dy)
                 
-                if distance <= pour_radius and k >= self.POUR_HEIGHT:
+                if distance <= pour_radius and k >= self.POUR_HEIGHT and k <= self.POUR_HEIGHT + 4:
                     vis_field[i, j, k] = 2.0  # 特殊標記值表示水流
     
     def get_pouring_info(self):

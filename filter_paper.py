@@ -44,27 +44,40 @@ class FilterPaperSystem:
         print(f"  濾紙孔徑: {self.PAPER_PORE_SIZE*1e6:.0f}微米")
     
     def initialize_filter_geometry(self):
-        """初始化濾紙幾何分佈"""
-        # 計算濾紙位置 (在V60底部，出水孔上方)
+        """初始化錐形濾紙幾何分佈"""
+        # 計算濾紙位置 (從V60底部延伸到整個錐形內表面)
         bottom_z = 5.0  # V60底部位置 (與lbm_solver.py一致)
-        self.filter_bottom_z = bottom_z - 1  # 濾紙在底部上方1格
+        self.filter_bottom_z = bottom_z  # 濾紙從底部開始
         self.filter_thickness_lu = max(1, int(self.PAPER_THICKNESS / config.SCALE_LENGTH))
         
         self._setup_filter_zones()
         self._calculate_initial_resistance()
         
-        print(f"濾紙幾何初始化完成:")
-        print(f"  濾紙位置: Z = {self.filter_bottom_z:.1f} 格子單位")
+        # 計算濾紙覆蓋的錐形表面積
+        cup_height_lu = config.CUP_HEIGHT / config.SCALE_LENGTH
+        filter_coverage_height = cup_height_lu
+        
+        print(f"錐形濾紙幾何初始化完成:")
+        print(f"  濾紙底部位置: Z = {self.filter_bottom_z:.1f} 格子單位")
+        print(f"  濾紙覆蓋高度: {filter_coverage_height:.1f} 格子單位")
         print(f"  濾紙厚度: {self.filter_thickness_lu} 格子單位")
+        print(f"  設計: 覆蓋整個V60內部表面（側面+底面）")
     
     @ti.kernel
     def _setup_filter_zones(self):
-        """設置濾紙區域標記"""
+        """設置錐形濾紙區域標記 - 覆蓋整個V60內部表面（不只是環狀層）"""
         center_x = config.NX * 0.5
         center_y = config.NY * 0.5
         top_radius_lu = config.TOP_RADIUS / config.SCALE_LENGTH
         bottom_radius_lu = config.BOTTOM_RADIUS / config.SCALE_LENGTH
         cup_height_lu = config.CUP_HEIGHT / config.SCALE_LENGTH
+        
+        # 濾紙覆蓋範圍：從V60底部到上方（錐形）
+        filter_top_z = 5.0 + cup_height_lu  # V60頂部
+        filter_bottom_z = self.filter_bottom_z  # V60底部稍上方
+        
+        # 濾紙厚度（格子單位）
+        paper_thickness_lu = ti.max(1.0, self.PAPER_THICKNESS / config.SCALE_LENGTH)
         
         for i, j, k in ti.ndrange(config.NX, config.NY, config.NZ):
             x = ti.cast(i, ti.f32)
@@ -73,15 +86,30 @@ class FilterPaperSystem:
             
             radius_from_center = ti.sqrt((x - center_x)**2 + (y - center_y)**2)
             
-            # 檢查是否在濾紙範圍內
-            if (z >= self.filter_bottom_z and 
-                z < self.filter_bottom_z + self.filter_thickness_lu):
+            # 檢查是否在濾紙高度範圍內
+            if z >= filter_bottom_z and z <= filter_top_z:
                 
-                # 計算V60在此高度的內半徑 (濾紙貼合V60錐形)
-                filter_height_ratio = (z - self.filter_bottom_z) / cup_height_lu
-                current_radius = bottom_radius_lu + (top_radius_lu - bottom_radius_lu) * filter_height_ratio
+                # 計算該高度的V60內表面半徑
+                height_ratio = (z - filter_bottom_z) / cup_height_lu
+                height_ratio = ti.max(0.0, ti.min(1.0, height_ratio))  # 限制在[0,1]
                 
-                if radius_from_center <= current_radius:
+                # V60內表面半徑 (濾紙覆蓋的邊界)
+                v60_inner_radius = bottom_radius_lu + (top_radius_lu - bottom_radius_lu) * height_ratio
+                
+                # === 濾紙覆蓋整個V60內部表面 ===
+                # 條件1：側面濾紙 - 靠近V60內壁的薄層
+                near_wall = (v60_inner_radius - paper_thickness_lu <= radius_from_center <= v60_inner_radius)
+                
+                # 條件2：底部濾紙 - 覆蓋整個V60底部區域
+                at_bottom = (z <= filter_bottom_z + paper_thickness_lu and 
+                           radius_from_center <= v60_inner_radius)
+                
+                # 條件3：底部出水孔附近加強覆蓋
+                near_outlet = (z <= filter_bottom_z + 2 * paper_thickness_lu and 
+                             radius_from_center <= bottom_radius_lu + paper_thickness_lu)
+                
+                # 如果滿足任一條件，標記為濾紙區域
+                if near_wall or at_bottom or near_outlet:
                     self.filter_zone[i, j, k] = 1  # 濾紙區域
                 else:
                     self.filter_zone[i, j, k] = 0  # 非濾紙區域
@@ -247,6 +275,38 @@ class FilterPaperSystem:
             'max_blockage': float(np.max(blockage_data) * 100) if total_filter_nodes > 0 else 0
         }
     
+    @ti.kernel
+    def get_filter_inner_radius_at_height(self, z: ti.f32) -> ti.f32:
+        """獲取指定高度的濾紙內表面半徑"""
+        bottom_z = self.filter_bottom_z
+        cup_height_lu = config.CUP_HEIGHT / config.SCALE_LENGTH
+        top_radius_lu = config.TOP_RADIUS / config.SCALE_LENGTH
+        bottom_radius_lu = config.BOTTOM_RADIUS / config.SCALE_LENGTH
+        
+        # 計算高度比例
+        height_ratio = (z - bottom_z) / cup_height_lu
+        height_ratio = ti.max(0.0, ti.min(1.0, height_ratio))
+        
+        # 錐形內半徑
+        inner_radius = bottom_radius_lu + (top_radius_lu - bottom_radius_lu) * height_ratio
+        return inner_radius
+    
+    def get_coffee_bed_boundary(self):
+        """獲取咖啡床邊界信息（供顆粒系統使用）"""
+        cup_height_lu = config.CUP_HEIGHT / config.SCALE_LENGTH
+        center_x = config.NX * 0.5
+        center_y = config.NY * 0.5
+        
+        return {
+            'center_x': center_x,
+            'center_y': center_y,
+            'bottom_z': self.filter_bottom_z,
+            'top_z': self.filter_bottom_z + cup_height_lu,
+            'top_radius_lu': config.TOP_RADIUS / config.SCALE_LENGTH,
+            'bottom_radius_lu': config.BOTTOM_RADIUS / config.SCALE_LENGTH,
+            'get_radius_at_height': self.get_filter_inner_radius_at_height
+        }
+        
     def print_status(self):
         """打印濾紙系統狀態"""
         stats = self.get_filter_statistics()
