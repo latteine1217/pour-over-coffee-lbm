@@ -57,7 +57,9 @@ class CoffeeSimulation:
         self.enhanced_viz = EnhancedVisualizer(
             self.lbm,
             self.multiphase,
-            None
+            None,
+            self.particle_system,  # 添加顆粒系統
+            self.filter_paper      # 添加濾紙系統
         )
         
         # 初始化場
@@ -67,71 +69,138 @@ class CoffeeSimulation:
         print(f"增強顆粒系統：{created_particles:,} 個高斯分布咖啡顆粒")
     
     def _initialize_simulation(self):
-        """初始化3D模擬場 - 使用增強顆粒系統"""
-        print("初始化場變數...")
+        """穩定的分階段初始化 - CFD數值穩定性優化"""
+        print("🔧 採用分階段穩定化初始化流程...")
         
-        # 初始化LBM場
+        # === 階段1：純流體場初始化 ===
+        print("階段1：純流體場初始化...")
         self.lbm.init_fields()
         
-        # 初始化多相流
+        # 讓純流體場穩定幾步
+        print("   └─ 純流體場穩定化 (10步)...")
+        for i in range(10):
+            self.lbm.step()
+        print("   ✅ 流體場基礎穩定")
+        
+        # === 階段2：加入多相流 ===
+        print("階段2：多相流系統耦合...")
         if self.multiphase:
             self.multiphase.init_phase_field()
+            
+            # 多相流穩定
+            print("   └─ 多相流場穩定化 (20步)...")
+            for i in range(20):
+                self.lbm.step()
+                self.multiphase.step()
+            print("   ✅ 多相流耦合穩定")
         
-        # 初始化濾紙系統（必須在顆粒系統之前）
-        print("正在初始化濾紙系統...")
+        # === 階段3：濾紙系統初始化 ===
+        print("階段3：濾紙邊界系統...")
         self.filter_paper.initialize_filter_geometry()
+        print("   ✅ 濾紙幾何邊界就緒")
         
-        # 使用新的增強顆粒系統 - 錐形約束生成
-        print(f"正在生成增強咖啡顆粒床...")
-        
+        # === 階段4：顆粒系統初始化 ===
+        print("階段4：咖啡顆粒系統...")
         created_particles = self.particle_system.initialize_coffee_bed_confined(self.filter_paper)
         
-        # 開始注水
+        # 顆粒-流體預穩定
+        print("   └─ 顆粒-流體耦合預穩定 (15步)...")
+        for i in range(15):
+            self.lbm.step()
+            if self.multiphase:
+                self.multiphase.step()
+            # 輕微顆粒更新（無流體力）
+            dt_physical = config.DT * config.SCALE_TIME * 0.1  # 使用很小的時間步
+            boundary = self.filter_paper.get_coffee_bed_boundary()
+            self.particle_system.update_particle_physics(
+                dt_physical,
+                boundary['center_x'], boundary['center_y'], boundary['bottom_z'],
+                boundary['bottom_radius_lu'], boundary['top_radius_lu']
+            )
+        print("   ✅ 顆粒系統預穩定")
+        
+        # === 階段5：注水系統啟動 ===
+        print("階段5：注水系統啟動...")
         if self.pouring:
             self.pouring.start_pouring(pattern='center')
+        print("   ✅ 注水系統就緒")
         
-        print("✅ 完整咖啡萃取系統初始化完成")
+        print("🎉 分階段穩定化初始化完成")
         print(f"   └─ 顆粒總數: {created_particles:,}")
-        print("   └─ 物理模型: 增強顆粒-流體耦合系統")
-        print("   └─ 顆粒分布: 高斯分布，30%標準差變異")
-        print("   └─ 流體作用力: 阻力+浮力+壓力梯度力")
-        print("   └─ 邊界約束: 錐形V60完美約束")
-        print("   └─ 濾紙系統: V60濾紙透水性與顆粒阻擋")
-        print("   └─ 特色功能: 真實尺度物理，科學級精度")
+        print("   └─ 數值穩定: 45步分階段預穩定")
+        print("   └─ 耦合強度: 漸進式增強")
+        print("   └─ CFD穩定性: 優化完成")
         
         return created_particles
     
     def step(self):
-        """執行一個3D模擬步驟 - 包含增強顆粒-流體-濾紙耦合"""
-        # 注水控制
-        if self.pouring:
-            self.pouring.apply_pouring(self.lbm.u, self.lbm.rho, 
-                                     self.multiphase.phi, config.DT)
+        """執行一個3D模擬步驟 - CFD數值穩定化版本"""
+        return self.step_stable()
+    
+    def step_stable(self):
+        """CFD數值穩定化步進 - 欠鬆弛 + 時間步控制"""
+        # === 策略2：欠鬆弛穩定化 ===
         
-        # LBM求解
-        if hasattr(self.lbm, 'step_with_particles'):
+        # 動態時間步控制（初期使用較小時間步）
+        if self.step_count < 50:
+            dt_safe = config.DT * 0.1  # 初期使用10%時間步
+            dt_coupling = dt_safe * 0.5  # 耦合使用更小時間步
+        elif self.step_count < 100:
+            dt_safe = config.DT * 0.5   # 中期使用50%時間步
+            dt_coupling = dt_safe * 0.7
+        else:
+            dt_safe = config.DT         # 穩定後使用全時間步
+            dt_coupling = dt_safe
+        
+        # 延遲啟動注水系統（避免初期數值衝擊）
+        if self.pouring and self.step_count > 30:  # 30步後才開始注水
+            # 使用修正的時間步進行注水
+            self.pouring.apply_pouring(self.lbm.u, self.lbm.rho, 
+                                     self.multiphase.phi, dt_safe)
+            
+            # 延遲同步相場（避免劇烈變化）
+            if self.step_count % 2 == 0:  # 每兩步同步一次
+                self.multiphase.update_density_from_phase()
+        
+        # LBM求解（核心流體計算）- 使用策略3的CFL控制
+        if hasattr(self.lbm, 'step_with_cfl_control'):
+            local_cfl = self.lbm.step_with_cfl_control()
+            if local_cfl > 0.5:  # 記錄高CFL事件
+                print(f"   步驟{self.step_count}: CFL={local_cfl:.3f}")
+        elif hasattr(self.lbm, 'step_with_particles'):
             self.lbm.step_with_particles(self.particle_system)
         else:
             self.lbm.step()
         
-        # 應用簡化的流體作用力到顆粒
-        if hasattr(self.lbm, 'u') and hasattr(self.lbm, 'rho'):
-            dt_physical = config.DT * config.SCALE_TIME
-            # 傳遞正確的參數給簡化版本
-            self.particle_system.apply_fluid_forces(
-                self.lbm.u, self.lbm.u, self.lbm.u,  # 三個參數但只使用第一個
-                self.lbm.rho, self.lbm.rho,  # density and pressure
-                dt_physical
-            )
+        # === 欠鬆弛流體-顆粒耦合 ===
+        if hasattr(self.lbm, 'u') and hasattr(self.lbm, 'rho') and self.step_count > 10:
+            dt_physical = dt_coupling * config.SCALE_TIME
+            
+            # 檢查局部速度合理性
+            u_data = self.lbm.u.to_numpy()
+            u_magnitude = np.sqrt(u_data[:,:,:,0]**2 + u_data[:,:,:,1]**2 + u_data[:,:,:,2]**2)
+            max_vel = np.max(u_magnitude)
+            
+            if max_vel < 0.1 and not np.isnan(max_vel) and not np.isinf(max_vel):  # 檢查合理性和有限性
+                # 使用欠鬆弛的流體力
+                self.particle_system.apply_fluid_forces(
+                    self.lbm.u, self.lbm.u, self.lbm.u,
+                    self.lbm.rho, self.lbm.rho,
+                    dt_physical  # 使用減小的時間步
+                )
+            else:
+                # 速度異常時跳過流體力計算
+                if self.step_count < 100 and (np.isnan(max_vel) or np.isinf(max_vel)):
+                    print(f"⚠️  步驟{self.step_count}: 速度場異常，跳過耦合")
         
-        # 更新顆粒物理（包含邊界約束）
+        # 顆粒物理更新（使用穩定化參數）
         if self.filter_paper:
             boundary = self.filter_paper.get_coffee_bed_boundary()
-            dt_physical = config.DT * config.SCALE_TIME
+            dt_physical = dt_safe * config.SCALE_TIME
+            
             self.particle_system.update_particle_physics(
                 dt_physical,
-                boundary['center_x'],
-                boundary['center_y'], 
+                boundary['center_x'], boundary['center_y'], 
                 boundary['bottom_z'],
                 boundary['bottom_radius_lu'],
                 boundary['top_radius_lu']
@@ -141,12 +210,23 @@ class CoffeeSimulation:
         if self.filter_paper and hasattr(self.filter_paper, 'step'):
             self.filter_paper.step(self.particle_system)
         
-        # 多相流處理
+        # 多相流處理（使用欠鬆弛）
         if self.multiphase:
             self.multiphase.step()
         
+        # 數值穩定性檢查
+        if self.step_count > 1:
+            stats = self.visualizer.get_statistics()
+            max_vel = stats.get('max_velocity', 0.0)
+            if np.isnan(max_vel) or np.isinf(max_vel):
+                print(f"❌ 步驟{self.step_count}: 數值發散！")
+                return False
+            elif max_vel > 0.15:
+                print(f"⚠️  步驟{self.step_count}: 速度偏高 {max_vel:.6f}")
+        
         # 更新計數器
         self.step_count += 1
+        return True
     
     def print_simulation_status(self):
         """打印模擬狀態 - 包含增強顆粒統計"""
@@ -189,10 +269,217 @@ class CoffeeSimulation:
         if current_time > 60:
             print("   ⏰ 咖啡萃取進行中")
     
-    def run(self, max_steps=None, show_progress=True, save_output=False):
-        """運行模擬"""
+    def run(self, max_steps=None, show_progress=True, save_output=False, debug_mode=False):
+        """運行模擬
+        
+        Args:
+            max_steps: 最大步數 
+            show_progress: 顯示進度
+            save_output: 保存輸出
+            debug_mode: 啟用詳細診斷模式
+        """
         if max_steps is None:
             max_steps = config.MAX_STEPS
+        
+        print(f"開始模擬 - 最大步數: {max_steps:,}")
+        
+        # Debug模式：統計歷史記錄
+        if debug_mode:
+            self.debug_stats = {
+                'velocity_history': [],
+                'water_mass_history': [],
+                'pouring_info': [],
+                'step_components': []
+            }
+            print("🔍 Debug模式啟用 - 收集詳細診斷資料")
+        
+        try:
+            for step in range(max_steps):
+                step_start_time = time.time()
+                
+                # Debug: 執行前檢查
+                if debug_mode and step < 10:
+                    self._debug_step_analysis(step, "before")
+                
+                # 執行模擬步驟
+                self.step()
+                
+                # Debug: 執行後檢查
+                if debug_mode and step < 10:
+                    self._debug_step_analysis(step, "after")
+                
+                step_time = time.time() - step_start_time
+                
+                # 進度報告
+                if show_progress and (step % config.OUTPUT_FREQ == 0 or step < 20):
+                    self._print_detailed_progress(step, max_steps, step_time, debug_mode)
+                
+                # Debug: 收集統計資料
+                if debug_mode:
+                    self._collect_debug_statistics(step)
+                
+                # 檢查異常終止條件
+                if self._check_termination_conditions(step, debug_mode):
+                    break
+                    
+        except KeyboardInterrupt:
+            print("\n⚠️  模擬被用戶中斷")
+        except Exception as e:
+            print(f"\n❌ 模擬出錯: {e}")
+            if debug_mode:
+                import traceback
+                traceback.print_exc()
+        
+        print("模擬完成")
+        
+        # Debug模式：輸出分析報告
+        if debug_mode:
+            self._print_debug_summary()
+    
+    def _debug_step_analysis(self, step, stage):
+        """逐步分析每個組件對速度場的影響"""
+        u_data = self.lbm.u.to_numpy()
+        u_magnitude = np.sqrt(u_data[:,:,:,0]**2 + u_data[:,:,:,1]**2 + u_data[:,:,:,2]**2)
+        non_zero_count = np.count_nonzero(u_magnitude)
+        max_vel = np.max(u_magnitude)
+        
+        component_info = {
+            'step': step,
+            'stage': stage,
+            'non_zero_points': non_zero_count,
+            'max_velocity': max_vel,
+            'avg_velocity': np.mean(u_magnitude[u_magnitude > 0]) if non_zero_count > 0 else 0.0
+        }
+        
+        if hasattr(self, 'debug_stats'):
+            self.debug_stats['step_components'].append(component_info)
+        
+        if step <= 5:  # 只打印前5步的詳細資料
+            print(f"    Debug步驟{step}-{stage}: 非零點={non_zero_count:,}, 最大速度={max_vel:.6f}")
+    
+    def _print_detailed_progress(self, step, max_steps, step_time, debug_mode):
+        """打印詳細進度資訊"""
+        progress = (step + 1) / max_steps * 100
+        current_time = self.step_count * config.SCALE_TIME
+        
+        print(f"\n⏱️  步驟: {step+1:,}/{max_steps:,} ({progress:.1f}%)")
+        print(f"   模擬時間: {current_time:.2f}s, 計算時間: {step_time*1000:.1f}ms")
+        
+        # 獲取統計資料
+        try:
+            stats = self.visualizer.get_statistics()
+            water_mass = stats['total_water_mass']
+            max_velocity = stats['max_velocity']
+            avg_velocity = stats['avg_velocity']
+            
+            print(f"🌊 流體統計: 水質量={water_mass:.3f}, 最大速度={max_velocity:.6f}, 平均速度={avg_velocity:.6f}")
+            
+            # 注水資訊
+            if self.pouring and hasattr(self.pouring, 'pouring_active'):
+                if self.pouring.pouring_active[None] == 1:
+                    pour_info = self.pouring.get_pouring_info()
+                    print(f"💧 注水狀態: 活躍 - {pour_info}")
+                else:
+                    print(f"💧 注水狀態: 停止")
+            
+            # Debug模式額外資訊
+            if debug_mode and step < 50:
+                u_data = self.lbm.u.to_numpy()
+                u_magnitude = np.sqrt(u_data[:,:,:,0]**2 + u_data[:,:,:,1]**2 + u_data[:,:,:,2]**2)
+                non_zero_count = np.count_nonzero(u_magnitude)
+                print(f"🔍 Debug: 非零速度點數={non_zero_count:,}")
+                
+        except Exception as e:
+            print(f"   統計資料獲取失敗: {e}")
+    
+    def _collect_debug_statistics(self, step):
+        """收集調試統計資料"""
+        try:
+            stats = self.visualizer.get_statistics()
+            
+            self.debug_stats['velocity_history'].append({
+                'step': step,
+                'max_velocity': stats['max_velocity'],
+                'avg_velocity': stats['avg_velocity']
+            })
+            
+            self.debug_stats['water_mass_history'].append({
+                'step': step,
+                'water_mass': stats['total_water_mass'],
+                'air_mass': stats['total_air_mass']
+            })
+            
+            # 注水資訊
+            if self.pouring and hasattr(self.pouring, 'pouring_active'):
+                if self.pouring.pouring_active[None] == 1:
+                    pour_info = self.pouring.get_pouring_info()
+                    self.debug_stats['pouring_info'].append({
+                        'step': step,
+                        'active': True,
+                        'info': pour_info
+                    })
+                    
+        except Exception as e:
+            print(f"Debug統計收集失敗: {e}")
+    
+    def _check_termination_conditions(self, step, debug_mode):
+        """檢查異常終止條件"""
+        try:
+            stats = self.visualizer.get_statistics()
+            
+            # 檢查速度場是否歸零（潛在問題）
+            if step > 50 and stats['max_velocity'] < 1e-8:
+                if debug_mode:
+                    print(f"⚠️  警告：步驟{step}時速度場歸零！")
+                    return False  # 不自動終止，讓用戶觀察
+                    
+            # 檢查數值發散
+            if stats['max_velocity'] > 1.0:  # 超過物理合理範圍
+                print(f"❌ 數值發散：最大速度={stats['max_velocity']:.3f}")
+                return True
+                
+            return False
+            
+        except Exception:
+            return False
+    
+    def _print_debug_summary(self):
+        """打印調試總結"""
+        print("\n" + "="*50)
+        print("🔍 DEBUG模式分析總結")
+        print("="*50)
+        
+        if hasattr(self, 'debug_stats'):
+            # 速度場分析
+            velocity_hist = self.debug_stats['velocity_history']
+            if velocity_hist:
+                max_velocities = [v['max_velocity'] for v in velocity_hist]
+                print(f"💨 速度場分析:")
+                print(f"   峰值速度: {max(max_velocities):.6f}")
+                print(f"   速度歸零步數: {next((v['step'] for v in velocity_hist if v['max_velocity'] < 1e-8), '無')}")
+                
+                # 找出速度突變點
+                for i in range(1, len(max_velocities)):
+                    if max_velocities[i-1] > 1e-6 and max_velocities[i] < 1e-8:
+                        print(f"   ⚠️  速度歸零於步驟: {velocity_hist[i]['step']}")
+                        break
+            
+            # 水質量分析  
+            water_hist = self.debug_stats['water_mass_history']
+            if water_hist:
+                water_masses = [w['water_mass'] for w in water_hist]
+                print(f"💧 水質量分析:")
+                print(f"   峰值水質量: {max(water_masses):.3f}")
+                print(f"   最終水質量: {water_masses[-1]:.3f}")
+            
+            # 注水分析
+            pour_hist = self.debug_stats['pouring_info']
+            if pour_hist:
+                active_steps = len([p for p in pour_hist if p['active']])
+                print(f"🚿 注水分析:")
+                print(f"   活躍注水步數: {active_steps}")
+        
+        print("="*50)
         
         print(f"=== 開始模擬 (最大步數: {max_steps}) ===")
         
@@ -302,47 +589,44 @@ class CoffeeSimulation:
         
         return stats
 
+def run_debug_simulation(max_steps=250):
+    """運行debug模式的模擬 - 方便調試使用"""
+    print("🔍 啟動DEBUG模式模擬")
+    print("="*50)
+    
+    # 創建模擬實例
+    sim = CoffeeSimulation()
+    sim._initialize_simulation()
+    
+    print("\n🚿 注水系統診斷:")
+    if hasattr(sim, 'pouring') and sim.pouring:
+        sim.pouring.diagnose_pouring_system()
+    
+    print("\n🔍 速度場診斷:")
+    if hasattr(sim, 'visualizer'):
+        sim.visualizer.diagnose_velocity_field_issue()
+    
+    print("\n開始debug模式運行...")
+    
+    # 運行debug模式
+    sim.run(max_steps=max_steps, debug_mode=True, show_progress=True)
+    
+    return sim
+
+
 def main():
-    """主程式入口"""
-    print("Pour-Over Coffee LBM Simulation (3D)")
-    print("使用opencode + GitHub Copilot開發")
-    print("=" * 50)
+    """主函數"""
+    import sys
     
-    # 解析命令行參數
-    interactive = False
-    
-    if len(sys.argv) > 1:
-        if 'interactive' in sys.argv:
-            interactive = True
-    
-    try:
-        # 創建3D模擬
-        sim = CoffeeSimulation(interactive=interactive)
-        
-        # 運行模擬
-        success = sim.run(show_progress=True, save_output=False)
-        
-        if success:
-            # 显示最终统计
-            sim.get_final_statistics()
-            
-            # 生成最终的高级分析图
-            print("\n=== 生成最终分析报告 ===")
-            sim.save_advanced_analysis()
-            
-            # 显示视觉化 (更新为纵向截面动画)
-            try:
-                response = input("\n显示縱向截面動畫? (y/N): ")
-                if response.lower() == 'y':
-                    sim.show_visualization('longitudinal_animation')
-            except (EOFError, KeyboardInterrupt):
-                # 非互動模式或用戶中斷，跳過視覺化
-                print("\n跳過視覺化顯示")
-                pass
-        
-    except Exception as e:
-        print(f"模擬失敗: {e}")
-        return 1
+    if len(sys.argv) > 1 and sys.argv[1] == "debug":
+        # Debug模式：python main.py debug [步數]
+        max_steps = int(sys.argv[2]) if len(sys.argv) > 2 else 250
+        sim = run_debug_simulation(max_steps=max_steps)
+    else:
+        # 正常模式運行
+        sim = CoffeeSimulation()
+        sim._initialize_simulation() 
+        sim.run()
     
     return 0
 

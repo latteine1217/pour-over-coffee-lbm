@@ -73,23 +73,9 @@ class MultiphaseFlow3D:
             z_ratio = k / cup_height
             current_radius = bottom_radius + (top_radius - bottom_radius) * z_ratio
             
-            # 初始界面設置：上部為水，下部為空氣，有平滑過渡
-            interface_z = config.NZ * 0.7  # 初始水面高度
-            
-            if k > interface_z + self.INTERFACE_WIDTH:
-                # 上部：純水相
-                self.phi[i, j, k] = 1.0
-            elif k < interface_z - self.INTERFACE_WIDTH:
-                # 下部：純氣相  
-                self.phi[i, j, k] = -1.0
-            else:
-                # 界面區域：tanh過渡 (滿足Cahn-Hilliard熱力學)
-                z_dist = (k - interface_z) / self.INTERFACE_WIDTH
-                self.phi[i, j, k] = ti.tanh(z_dist)
-            
-            # 在V60容器外部設為氣相
-            if r > current_radius and k < cup_height:
-                self.phi[i, j, k] = -1.0
+            # 初始狀態：完全乾燥的V60濾杯，全部為氣相
+            # 這樣才能模擬真實的注水過程
+            self.phi[i, j, k] = -1.0  # 全部設為氣相（乾燥狀態）
     
     @ti.kernel
     def compute_chemical_potential(self):

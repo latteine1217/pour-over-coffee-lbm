@@ -179,8 +179,120 @@ class PrecisePouringSystem:
                         
                         particle_system.force[p] += impact_force
     
-    @ti.kernel
-    def visualize_pour_stream(self, vis_field: ti.template()):
+    def get_pouring_info(self):
+        """獲取注水資訊用於診斷"""
+        if self.pouring_active[None] == 1:
+            pour_x, pour_y = self._get_current_pour_position()
+            return {
+                'active': True,
+                'position': (float(pour_x), float(pour_y)),
+                'diameter_grid': float(self.POUR_DIAMETER_GRID),
+                'diameter_cm': float(self.POUR_DIAMETER_CM),
+                'velocity': float(self.POUR_VELOCITY),
+                'flow_rate': float(self.pour_flow_rate[None]),
+                'pour_time': float(self.pour_time[None]),
+                'pattern': int(self.pour_pattern[None])
+            }
+        else:
+            return {
+                'active': False,
+                'position': (0, 0),
+                'diameter_grid': 0,
+                'diameter_cm': 0,
+                'velocity': 0,
+                'flow_rate': 0,
+                'pour_time': 0,
+                'pattern': 0
+            }
+    
+    def get_pouring_diagnostics(self):
+        """獲取注水系統診斷資訊"""
+        diagnostics = {
+            'configuration': {
+                'diameter_cm': self.POUR_DIAMETER_CM,
+                'diameter_grid': self.POUR_DIAMETER_GRID,
+                'height': self.POUR_HEIGHT,
+                'velocity': self.POUR_VELOCITY,
+                'grid_size_cm': config.GRID_SIZE_CM
+            },
+            'current_state': self.get_pouring_info(),
+            'conditions_check': self._check_pouring_conditions()
+        }
+        return diagnostics
+    
+    def _check_pouring_conditions(self):
+        """檢查注水條件的有效性"""
+        pour_radius = self.POUR_DIAMETER_GRID / 2.0
+        pour_z = self.POUR_HEIGHT
+        pour_stream_height = 4.0
+        center_x = config.NX // 2
+        center_y = config.NY // 2
+        
+        # 統計滿足注水條件的格子數
+        affected_cells = 0
+        total_checked = 0
+        
+        # 簡單檢查（避免在Python中嵌套三層循環）
+        for i in range(max(0, int(center_x - pour_radius)), 
+                      min(config.NX, int(center_x + pour_radius + 1))):
+            for j in range(max(0, int(center_y - pour_radius)),
+                          min(config.NY, int(center_y + pour_radius + 1))):
+                for k in range(max(0, int(pour_z)),
+                              min(config.NZ, int(pour_z + pour_stream_height + 1))):
+                    total_checked += 1
+                    
+                    dx = i - center_x
+                    dy = j - center_y
+                    distance_to_pour = (dx*dx + dy*dy)**0.5
+                    
+                    if distance_to_pour <= pour_radius and k >= pour_z and k <= pour_z + pour_stream_height:
+                        affected_cells += 1
+        
+        return {
+            'center_position': (center_x, center_y),
+            'pour_radius': pour_radius,
+            'z_range': [pour_z, pour_z + pour_stream_height],
+            'affected_cells': affected_cells,
+            'total_checked': total_checked,
+            'effectiveness': affected_cells / max(1, total_checked)
+        }
+    
+    def diagnose_pouring_system(self):
+        """診斷注水系統"""
+        print("\n🚿 注水系統診斷")
+        print("-" * 30)
+        
+        diagnostics = self.get_pouring_diagnostics()
+        
+        # 配置資訊
+        config_info = diagnostics['configuration']
+        print(f"配置:")
+        print(f"  注水直徑: {config_info['diameter_cm']:.2f} cm ({config_info['diameter_grid']:.1f} 格)")
+        print(f"  注水高度: {config_info['height']:.1f} 格")
+        print(f"  注水速度: {config_info['velocity']:.3f}")
+        print(f"  格子尺寸: {config_info['grid_size_cm']:.3f} cm")
+        
+        # 當前狀態
+        state = diagnostics['current_state']
+        print(f"\n當前狀態:")
+        print(f"  注水活躍: {'是' if state['active'] else '否'}")
+        if state['active']:
+            print(f"  注水位置: ({state['position'][0]:.1f}, {state['position'][1]:.1f})")
+            print(f"  流量率: {state['flow_rate']:.3f}")
+            print(f"  注水時間: {state['pour_time']:.2f}s")
+        
+        # 條件檢查
+        conditions = diagnostics['conditions_check']
+        print(f"\n條件檢查:")
+        print(f"  影響格子數: {conditions['affected_cells']:,}")
+        print(f"  檢查格子數: {conditions['total_checked']:,}")
+        print(f"  有效性: {conditions['effectiveness']:.1%}")
+        print(f"  Z範圍: {conditions['z_range'][0]:.1f} -> {conditions['z_range'][1]:.1f}")
+        
+        if conditions['affected_cells'] == 0:
+            print("⚠️  警告：沒有格子受到注水影響！")
+        elif conditions['affected_cells'] < 10:
+            print("⚠️  警告：受影響格子數過少！")
         """在可視化場中標記水流位置"""
         if self.pouring_active[None] == 1:
             pour_x, pour_y = self._get_current_pour_position()

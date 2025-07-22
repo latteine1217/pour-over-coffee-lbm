@@ -6,6 +6,7 @@
 
 import taichi as ti
 import numpy as np
+import time
 import config
 
 @ti.data_oriented
@@ -165,16 +166,19 @@ class UnifiedVisualizer:
         self.stats[5] = total_nodes
     
     def get_statistics(self):
-        """獲取統計信息 - 簡化版本"""
+        """獲取統計信息 - 實際計算版本"""
         try:
-            # 直接返回預設值避免複雜的計算
+            # 執行實際的統計計算
+            self.compute_statistics()
+            
+            # 從Taichi場中讀取結果
             return {
-                'total_water_mass': 1.0,
-                'total_air_mass': 0.1,
-                'max_velocity': 0.001,
-                'min_velocity': 0.0,
-                'avg_velocity': 0.0005,
-                'total_nodes': config.NX * config.NY * config.NZ
+                'total_water_mass': float(self.stats[0]),
+                'total_air_mass': float(self.stats[1]),
+                'max_velocity': float(self.stats[2]),
+                'min_velocity': float(self.stats[3]),
+                'avg_velocity': float(self.stats[4]),
+                'total_nodes': int(self.stats[5])
             }
         except Exception as e:
             print(f"Statistics computation error: {e}")
@@ -186,6 +190,103 @@ class UnifiedVisualizer:
                 'avg_velocity': 0.0,
                 'total_nodes': 0
             }
+    
+    def get_detailed_diagnostics(self):
+        """獲取詳細診斷資訊"""
+        try:
+            # 基本統計
+            basic_stats = self.get_statistics()
+            
+            # 額外診斷資訊
+            u_data = self.lbm_solver.u.to_numpy()
+            rho_data = self.lbm_solver.rho.to_numpy()
+            
+            # 速度場分析
+            u_magnitude = np.sqrt(u_data[:,:,:,0]**2 + u_data[:,:,:,1]**2 + u_data[:,:,:,2]**2)
+            non_zero_velocity = u_magnitude > 1e-8
+            
+            # 相場分析（如果有）
+            phase_stats = {}
+            if self.multiphase_solver:
+                phi_data = self.multiphase_solver.phi.to_numpy()
+                water_phase = phi_data > 0.5
+                air_phase = phi_data <= 0.5
+                
+                phase_stats = {
+                    'water_cells': int(np.sum(water_phase)),
+                    'air_cells': int(np.sum(air_phase)),
+                    'interface_cells': int(np.sum(np.abs(phi_data) < 0.5)),
+                    'max_phi': float(np.max(phi_data)),
+                    'min_phi': float(np.min(phi_data))
+                }
+            
+            # 流場診斷
+            flow_diagnostics = {
+                'non_zero_velocity_cells': int(np.sum(non_zero_velocity)),
+                'velocity_std': float(np.std(u_magnitude)),
+                'max_u_x': float(np.max(u_data[:,:,:,0])),
+                'max_u_y': float(np.max(u_data[:,:,:,1])),
+                'max_u_z': float(np.max(u_data[:,:,:,2])),
+                'density_range': [float(np.min(rho_data)), float(np.max(rho_data))]
+            }
+            
+            return {
+                'basic_stats': basic_stats,
+                'phase_stats': phase_stats,
+                'flow_diagnostics': flow_diagnostics,
+                'timestamp': time.time()
+            }
+            
+        except Exception as e:
+            print(f"Detailed diagnostics error: {e}")
+            return {
+                'basic_stats': self.get_statistics(),
+                'phase_stats': {},
+                'flow_diagnostics': {},
+                'error': str(e)
+            }
+    
+    def diagnose_velocity_field_issue(self):
+        """診斷速度場問題"""
+        print("\n🔍 速度場問題診斷")
+        print("-" * 30)
+        
+        try:
+            u_data = self.lbm_solver.u.to_numpy()
+            u_magnitude = np.sqrt(u_data[:,:,:,0]**2 + u_data[:,:,:,1]**2 + u_data[:,:,:,2]**2)
+            
+            # 統計分析
+            total_cells = u_magnitude.size
+            non_zero_cells = np.sum(u_magnitude > 1e-8)
+            max_velocity = np.max(u_magnitude)
+            
+            print(f"總格子數: {total_cells:,}")
+            print(f"非零速度格子: {non_zero_cells:,} ({non_zero_cells/total_cells*100:.2f}%)")
+            print(f"最大速度: {max_velocity:.8f}")
+            
+            # 空間分布分析
+            if non_zero_cells > 0:
+                non_zero_indices = np.where(u_magnitude > 1e-8)
+                z_distribution = np.bincount(non_zero_indices[2], minlength=config.NZ)
+                
+                print(f"垂直分布（Z方向非零點數）:")
+                for z in range(0, config.NZ, max(1, config.NZ//10)):
+                    if z < len(z_distribution):
+                        print(f"  Z={z:3d}: {z_distribution[z]:4d}點")
+            
+            # 相場檢查
+            if self.multiphase_solver:
+                phi_data = self.multiphase_solver.phi.to_numpy()
+                water_cells = np.sum(phi_data > 0.5)
+                print(f"水相格子數: {water_cells:,}")
+                
+                if water_cells == 0:
+                    print("⚠️  警告：沒有水相！")
+                elif non_zero_cells == 0:
+                    print("⚠️  警告：有水相但無流動！")
+            
+        except Exception as e:
+            print(f"診斷失敗: {e}")
     
     def display_gui(self, field_type='density', slice_direction='xy', slice_idx=None):
         """顯示GUI"""

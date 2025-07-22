@@ -56,7 +56,7 @@ AIR_VISCOSITY_20C = 1.516e-5           # m²/s
 # V60幾何參數 (真實規格)
 CUP_HEIGHT = 0.085                     # m (8.5 cm)
 TOP_RADIUS = 0.058                     # m (11.6 cm直徑)
-BOTTOM_RADIUS = 0.002                  # m (4 mm出水孔)
+BOTTOM_RADIUS = 0.010                  # m (2 cm出水孔，真實V60尺寸)
 
 # ==============================================
 # 科學的尺度轉換 (CFD專家修正版)
@@ -71,8 +71,8 @@ NU_CHAR = WATER_VISCOSITY_90C
 
 # 格子尺度轉換 (基於NZ=128格點)
 SCALE_LENGTH = L_CHAR / NZ             # 0.664 mm/lu (合理的格子解析度)
-SCALE_VELOCITY = 0.02                  # lu/ts (CFL < 0.1)
-SCALE_TIME = SCALE_LENGTH / SCALE_VELOCITY  # 33.2 ms/ts
+SCALE_VELOCITY = 0.01                  # lu/ts (保守初始值，策略2優化)
+SCALE_TIME = SCALE_LENGTH / SCALE_VELOCITY  # 66.4 ms/ts (加倍穩定性)
 SCALE_DENSITY = RHO_CHAR               
 
 # 網格物理尺寸
@@ -87,8 +87,8 @@ NU_WATER_LU = WATER_VISCOSITY_90C * SCALE_TIME / (SCALE_LENGTH**2)
 NU_AIR_LU = AIR_VISCOSITY_20C * SCALE_TIME / (SCALE_LENGTH**2)
 
 # LBM正確理論: ν = c_s²(τ - 0.5), where c_s² = 1/3
-TAU_WATER = NU_WATER_LU / CS2 + 0.5    
-TAU_AIR = NU_AIR_LU / CS2 + 0.5        
+TAU_WATER = max(0.8, NU_WATER_LU / CS2 + 0.5)  # 強制最小值，增加數值穩定性
+TAU_AIR = max(0.8, NU_AIR_LU / CS2 + 0.5)      # 增加黏性穩定性        
 
 # 檢查數值穩定性範圍
 MIN_TAU_STABLE = 0.51   # 絕對穩定性下限

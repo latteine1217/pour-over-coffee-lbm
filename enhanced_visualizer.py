@@ -278,15 +278,15 @@ class EnhancedVisualizer:
         
         generated_files = []
         
-        # 1. 多物理場綜合分析
-        multi_file = self.save_multiphysics_analysis(simulation_time, step_num)
+        # 1. 綜合分析
+        multi_file = self.save_combined_analysis(simulation_time, step_num)
         if multi_file:
             generated_files.append(multi_file)
         
-        # 2. 時間序列分析
-        temporal_file = self.save_temporal_analysis(simulation_time, step_num)
-        if temporal_file:
-            generated_files.append(temporal_file)
+        # 2. 速度場分析
+        velocity_file = self.save_velocity_analysis(simulation_time, step_num)
+        if velocity_file:
+            generated_files.append(velocity_file)
         
         # 3. 保持原有功能兼容性
         longitudinal_file = self.save_longitudinal_analysis(simulation_time, step_num)
@@ -384,38 +384,52 @@ class EnhancedVisualizer:
     # === 保持向後兼容性的舊版函數 ===
     
     def save_longitudinal_analysis(self, simulation_time, step_num):
-        """保存縱向分析圖（兼容性函數）"""
+        """保存縱向分析圖（修復版 - 添加顆粒和邊界可視化）"""
         try:
             fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
             
             # 密度分析
             if hasattr(self.lbm, 'rho'):
                 rho_data = self.lbm.rho.to_numpy()
+                
+                # 使用安全的數據處理
+                rho_data = np.nan_to_num(rho_data, nan=1.0, posinf=1.0, neginf=0.0)
+                rho_data = np.clip(rho_data, 0.0, 2.0)  # 限制密度範圍
+                
                 z_slice = rho_data[:, config.NY//2, :]
                 
-                im1 = ax1.imshow(z_slice.T, origin='lower', aspect='auto', cmap=self.density_cmap)
+                im1 = ax1.imshow(z_slice.T, origin='lower', aspect='auto', cmap=self.density_cmap, vmin=0.0, vmax=1.5)
                 ax1.set_title(f'Density Profile (t={simulation_time:.2f}s)', fontsize=12)
                 ax1.set_xlabel('X Position')
                 ax1.set_ylabel('Z Position')
                 plt.colorbar(im1, ax=ax1)
                 
-                # 添加V60輪廓
-                self._add_v60_outline(ax1, 'xz')
+                # 添加V60輪廓和邊界
+                self._add_v60_outline_fixed(ax1, 'xz')
+                
+                # 添加顆粒可視化
+                self._add_particles_to_plot(ax1, 'xz', config.NY//2)
                 
                 # 速度分析
                 if hasattr(self.lbm, 'u'):
                     u_data = self.lbm.u.to_numpy()
+                    u_data = np.nan_to_num(u_data, nan=0.0, posinf=0.0, neginf=0.0)
+                    
                     u_magnitude = np.sqrt(u_data[:, :, :, 0]**2 + u_data[:, :, :, 1]**2 + u_data[:, :, :, 2]**2)
+                    u_magnitude = np.clip(u_magnitude, 0.0, 0.5)  # 限制速度範圍
                     u_slice = u_magnitude[:, config.NY//2, :]
                     
-                    im2 = ax2.imshow(u_slice.T, origin='lower', aspect='auto', cmap=self.velocity_cmap)
+                    im2 = ax2.imshow(u_slice.T, origin='lower', aspect='auto', cmap=self.velocity_cmap, vmin=0.0, vmax=0.1)
                     ax2.set_title(f'Velocity Magnitude (t={simulation_time:.2f}s)', fontsize=12)
                     ax2.set_xlabel('X Position')
                     ax2.set_ylabel('Z Position')
                     plt.colorbar(im2, ax=ax2)
                     
                     # 添加V60輪廓
-                    self._add_v60_outline(ax2, 'xz')
+                    self._add_v60_outline_fixed(ax2, 'xz')
+                    
+                    # 添加顆粒可視化
+                    self._add_particles_to_plot(ax2, 'xz', config.NY//2)
             
             filename = f'v60_longitudinal_analysis_step_{step_num:04d}.png'
             plt.tight_layout()
@@ -429,23 +443,32 @@ class EnhancedVisualizer:
             return None
     
     def save_velocity_analysis(self, simulation_time, step_num):
-        """保存速度分析圖（兼容性函數）"""
+        """保存速度分析圖（修復版）"""
         try:
             fig, ax = plt.subplots(1, 1, figsize=(8, 6))
             
             if hasattr(self.lbm, 'u'):
                 u_data = self.lbm.u.to_numpy()
+                u_data = np.nan_to_num(u_data, nan=0.0, posinf=0.0, neginf=0.0)
+                
                 u_magnitude = np.sqrt(u_data[:, :, :, 0]**2 + u_data[:, :, :, 1]**2 + u_data[:, :, :, 2]**2)
+                u_magnitude = np.clip(u_magnitude, 0.0, 0.5)  # 限制速度範圍
                 
                 # 取XY平面切片
                 z_level = config.NZ // 2
                 u_slice = u_magnitude[:, :, z_level]
                 
-                im = ax.imshow(u_slice.T, origin='lower', aspect='equal', cmap=self.velocity_cmap)
+                im = ax.imshow(u_slice.T, origin='lower', aspect='equal', cmap=self.velocity_cmap, vmin=0.0, vmax=0.1)
                 ax.set_title(f'Velocity Field (t={simulation_time:.2f}s, Z={z_level})', fontsize=12)
                 ax.set_xlabel('X Position')
                 ax.set_ylabel('Y Position')
                 plt.colorbar(im, ax=ax)
+                
+                # 添加V60頂視圖輪廓
+                self._add_v60_outline_fixed(ax, 'xy')
+                
+                # 添加顆粒可視化
+                self._add_particles_to_plot(ax, 'xy', z_level)
             
             filename = f'velocity_analysis_step_{step_num:04d}.png'
             plt.tight_layout()
@@ -459,38 +482,53 @@ class EnhancedVisualizer:
             return None
     
     def save_combined_analysis(self, simulation_time, step_num):
-        """保存組合分析圖（兼容性函數）"""
+        """保存組合分析圖（修復版）"""
         try:
             fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(12, 10))
             
             if hasattr(self.lbm, 'rho') and hasattr(self.lbm, 'u'):
                 rho_data = self.lbm.rho.to_numpy()
                 u_data = self.lbm.u.to_numpy()
+                
+                # 安全數據處理
+                rho_data = np.nan_to_num(rho_data, nan=1.0, posinf=1.0, neginf=0.0)
+                rho_data = np.clip(rho_data, 0.0, 2.0)
+                u_data = np.nan_to_num(u_data, nan=0.0, posinf=0.0, neginf=0.0)
+                
                 u_magnitude = np.sqrt(u_data[:, :, :, 0]**2 + u_data[:, :, :, 1]**2 + u_data[:, :, :, 2]**2)
+                u_magnitude = np.clip(u_magnitude, 0.0, 0.5)
                 
                 # 密度 XZ切面
                 z_slice_rho = rho_data[:, config.NY//2, :]
-                im1 = ax1.imshow(z_slice_rho.T, origin='lower', aspect='auto', cmap=self.density_cmap)
+                im1 = ax1.imshow(z_slice_rho.T, origin='lower', aspect='auto', cmap=self.density_cmap, vmin=0.0, vmax=1.5)
                 ax1.set_title('Density (XZ plane)', fontsize=10)
                 plt.colorbar(im1, ax=ax1)
+                self._add_v60_outline_fixed(ax1, 'xz')
+                self._add_particles_to_plot(ax1, 'xz', config.NY//2)
                 
                 # 速度 XZ切面
                 z_slice_u = u_magnitude[:, config.NY//2, :]
-                im2 = ax2.imshow(z_slice_u.T, origin='lower', aspect='auto', cmap=self.velocity_cmap)
+                im2 = ax2.imshow(z_slice_u.T, origin='lower', aspect='auto', cmap=self.velocity_cmap, vmin=0.0, vmax=0.1)
                 ax2.set_title('Velocity (XZ plane)', fontsize=10)
                 plt.colorbar(im2, ax=ax2)
+                self._add_v60_outline_fixed(ax2, 'xz')
+                self._add_particles_to_plot(ax2, 'xz', config.NY//2)
                 
                 # 密度 XY切面
                 xy_slice_rho = rho_data[:, :, config.NZ//2]
-                im3 = ax3.imshow(xy_slice_rho.T, origin='lower', aspect='equal', cmap=self.density_cmap)
+                im3 = ax3.imshow(xy_slice_rho.T, origin='lower', aspect='equal', cmap=self.density_cmap, vmin=0.0, vmax=1.5)
                 ax3.set_title('Density (XY plane)', fontsize=10)
                 plt.colorbar(im3, ax=ax3)
+                self._add_v60_outline_fixed(ax3, 'xy')
+                self._add_particles_to_plot(ax3, 'xy', config.NZ//2)
                 
                 # 速度 XY切面
                 xy_slice_u = u_magnitude[:, :, config.NZ//2]
-                im4 = ax4.imshow(xy_slice_u.T, origin='lower', aspect='equal', cmap=self.velocity_cmap)
+                im4 = ax4.imshow(xy_slice_u.T, origin='lower', aspect='equal', cmap=self.velocity_cmap, vmin=0.0, vmax=0.1)
                 ax4.set_title('Velocity (XY plane)', fontsize=10)
                 plt.colorbar(im4, ax=ax4)
+                self._add_v60_outline_fixed(ax4, 'xy')
+                self._add_particles_to_plot(ax4, 'xy', config.NZ//2)
             
             plt.suptitle(f'Combined Analysis (t={simulation_time:.2f}s)', fontsize=14)
             filename = f'combined_analysis_step_{step_num:04d}.png'
@@ -510,25 +548,110 @@ class EnhancedVisualizer:
         print("💡 使用 generate_research_report() 獲得完整分析")
         print("📊 使用 save_temporal_analysis() 獲得時間序列分析")
     
-    def _add_v60_outline(self, ax, plane='xz'):
-        """添加V60輪廓到圖表"""
+    def _add_v60_outline_fixed(self, ax, plane='xz'):
+        """添加修復版V60輪廓到圖表"""
         try:
-            # V60幾何參數 (簡化輪廓)
             if plane == 'xz':
-                # 繪製V60錐形輪廓
+                # V60幾何參數
                 center_x = config.NX // 2
                 bottom_z = 5
-                top_z = bottom_z + config.COFFEE_BED_HEIGHT_LU
+                top_z = bottom_z + config.CUP_HEIGHT / config.SCALE_LENGTH
                 top_radius = config.TOP_RADIUS / config.SCALE_LENGTH
+                bottom_radius = config.BOTTOM_RADIUS / config.SCALE_LENGTH
                 
-                # 錐形左右邊界
-                x_left = center_x - top_radius
-                x_right = center_x + top_radius
+                # 繪製V60錐形輪廓
+                x_left_top = center_x - top_radius
+                x_right_top = center_x + top_radius
+                x_left_bottom = center_x - bottom_radius
+                x_right_bottom = center_x + bottom_radius
                 
-                # 繪製輪廓線
-                ax.plot([x_left, center_x, x_right], [top_z, bottom_z, top_z], 
-                       'k--', linewidth=1, alpha=0.7, label='V60 Outline')
+                # V60內壁輪廓
+                ax.plot([x_left_top, x_left_bottom], [top_z, bottom_z], 
+                       'k-', linewidth=2, alpha=0.8, label='V60 Inner Wall')
+                ax.plot([x_right_top, x_right_bottom], [top_z, bottom_z], 
+                       'k-', linewidth=2, alpha=0.8)
+                
+                # V60底部
+                ax.plot([x_left_bottom, x_right_bottom], [bottom_z, bottom_z], 
+                       'k-', linewidth=2, alpha=0.8)
+                
+                # 出水孔
+                hole_radius = config.BOTTOM_RADIUS / config.SCALE_LENGTH / 2
+                ax.plot([center_x - hole_radius, center_x + hole_radius], [bottom_z, bottom_z], 
+                       'r-', linewidth=3, alpha=0.8, label='Outlet Hole')
+                
+                # 添加圖例
+                ax.legend(loc='upper right', fontsize=8)
+                
+            elif plane == 'xy':
+                # XY平面的V60圓形輪廓
+                center_x = config.NX // 2
+                center_y = config.NY // 2
+                top_radius = config.TOP_RADIUS / config.SCALE_LENGTH
+                bottom_radius = config.BOTTOM_RADIUS / config.SCALE_LENGTH
+                
+                # 繪製V60頂部圓形輪廓
+                circle_top = plt.Circle((center_x, center_y), top_radius, 
+                                      fill=False, color='black', linewidth=2, alpha=0.8, label='V60 Top')
+                ax.add_patch(circle_top)
+                
+                # 繪製出水孔
+                hole_radius = bottom_radius / 2
+                circle_hole = plt.Circle((center_x, center_y), hole_radius, 
+                                       fill=False, color='red', linewidth=2, alpha=0.8, label='Outlet Hole')
+                ax.add_patch(circle_hole)
+                
+                # 添加圖例
+                ax.legend(loc='upper right', fontsize=8)
                 
         except Exception as e:
             # 如果輪廓繪製失敗，靜默忽略
+            pass
+    
+    def _add_particles_to_plot(self, ax, plane='xz', slice_idx=None):
+        """添加咖啡顆粒到圖表"""
+        if not self.particles:
+            return
+            
+        try:
+            # 獲取顆粒數據
+            positions = self.particles.position.to_numpy()
+            active = self.particles.active.to_numpy()
+            
+            active_particles = positions[active == 1]
+            
+            if len(active_particles) == 0:
+                return
+            
+            if plane == 'xz' and slice_idx is not None:
+                # 在XZ平面顯示，選擇Y坐標接近slice_idx的顆粒
+                tolerance = 5.0  # 容忍範圍
+                selected_particles = active_particles[
+                    np.abs(active_particles[:, 1] - slice_idx) <= tolerance
+                ]
+                
+                if len(selected_particles) > 0:
+                    # 繪製顆粒
+                    ax.scatter(selected_particles[:, 0], selected_particles[:, 2], 
+                             c='brown', s=2, alpha=0.6, label=f'Coffee Particles ({len(selected_particles)})')
+                    
+            elif plane == 'xy' and slice_idx is not None:
+                # 在XY平面顯示，選擇Z坐標接近slice_idx的顆粒
+                tolerance = 5.0  # 容忍範圍
+                selected_particles = active_particles[
+                    np.abs(active_particles[:, 2] - slice_idx) <= tolerance
+                ]
+                
+                if len(selected_particles) > 0:
+                    # 繪製顆粒
+                    ax.scatter(selected_particles[:, 0], selected_particles[:, 1], 
+                             c='brown', s=2, alpha=0.6, label=f'Coffee Particles ({len(selected_particles)})')
+                    
+            # 更新圖例
+            handles, labels = ax.get_legend_handles_labels()
+            if len(handles) > 0:
+                ax.legend(handles, labels, loc='upper right', fontsize=8)
+                    
+        except Exception as e:
+            # 如果顆粒繪製失敗，靜默忽略
             pass
