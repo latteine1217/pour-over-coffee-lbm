@@ -17,7 +17,7 @@ from datetime import datetime
 import config
 
 class EnhancedVisualizer:
-    def __init__(self, lbm_solver, multiphase=None, geometry=None, particle_system=None, filter_system=None):
+    def __init__(self, lbm_solver, multiphase=None, geometry=None, particle_system=None, filter_system=None, simulation=None):
         """
         科研級視覺化系統初始化
         
@@ -27,12 +27,14 @@ class EnhancedVisualizer:
             geometry: 幾何系統
             particle_system: 咖啡顆粒系統
             filter_system: 濾紙系統
+            simulation: 主模擬系統引用（用於診斷數據訪問）
         """
         self.lbm = lbm_solver
         self.multiphase = multiphase
         self.geometry = geometry
         self.particles = particle_system
         self.filter = filter_system
+        self.simulation = simulation  # 新增：用於訪問診斷數據
         
         # 科研分析參數
         self.analysis_data = {
@@ -292,14 +294,13 @@ class EnhancedVisualizer:
         longitudinal_file = self.save_longitudinal_analysis(simulation_time, step_num)
         if longitudinal_file:
             generated_files.append(longitudinal_file)
-        
-        velocity_file = self.save_velocity_analysis(simulation_time, step_num)
-        if velocity_file:
-            generated_files.append(velocity_file)
-        
-        combined_file = self.save_combined_analysis(simulation_time, step_num)
-        if combined_file:
-            generated_files.append(combined_file)
+            
+        # 4. LBM診斷監控 (新增)
+        if hasattr(self, 'simulation') and hasattr(self.simulation, 'lbm_diagnostics'):
+            lbm_file = self.save_lbm_monitoring_chart(simulation_time, step_num)
+            if lbm_file:
+                generated_files.append(lbm_file)
+                print(f"   📊 LBM診斷: {lbm_file}")
         
         print(f"✅ 科研報告生成完成，共 {len(generated_files)} 個文件:")
         for file in generated_files:
@@ -655,3 +656,131 @@ class EnhancedVisualizer:
         except Exception as e:
             # 如果顆粒繪製失敗，靜默忽略
             pass
+
+    def save_lbm_monitoring_chart(self, simulation_time, step_num):
+        """
+        生成LBM診斷監控圖表
+        """
+        try:
+            if not hasattr(self, 'simulation') or not hasattr(self.simulation, 'lbm_diagnostics'):
+                return None
+                
+            diagnostics = self.simulation.lbm_diagnostics
+            if not diagnostics:
+                return None
+                
+            fig = plt.figure(figsize=(16, 10))
+            gs = fig.add_gridspec(3, 2, hspace=0.3, wspace=0.3)
+            
+            # 1. 穩定性監控
+            ax1 = fig.add_subplot(gs[0, 0])
+            if len(diagnostics.history['time_stability']) > 0:
+                ax1.plot(diagnostics.history['time_stability'], label='Time Stability', color='blue')
+                ax1.set_title('LBM Stability Metrics')
+                ax1.set_ylabel('Stability')
+                ax1.set_xlabel('Step')
+                ax1.grid(True)
+                ax1.legend()
+            else:
+                ax1.text(0.5, 0.5, 'No stability data', ha='center', va='center')
+                ax1.set_xlim(0, 1)
+                ax1.set_ylim(0, 1)
+            
+            # 2. Mach數監控
+            ax2 = fig.add_subplot(gs[0, 1])
+            if len(diagnostics.history['max_mach']) > 0:
+                ax2.plot(diagnostics.history['max_mach'], label='Max Mach', color='red')
+                ax2.axhline(y=0.1, color='orange', linestyle='--', label='Warning (Ma=0.1)')
+                ax2.axhline(y=0.3, color='red', linestyle='--', label='Critical (Ma=0.3)')
+                ax2.set_title('Mach Number Monitoring')
+                ax2.set_ylabel('Mach Number')
+                ax2.set_xlabel('Step')
+                ax2.grid(True)
+                ax2.legend()
+            else:
+                ax2.text(0.5, 0.5, 'No Mach data', ha='center', va='center')
+                ax2.set_xlim(0, 1)
+                ax2.set_ylim(0, 1)
+            
+            # 3. 守恆定律
+            ax3 = fig.add_subplot(gs[1, 0])
+            if len(diagnostics.history['mass_conservation']) > 0:
+                ax3.plot(diagnostics.history['mass_conservation'], label='Mass Conservation', color='green')
+                if len(diagnostics.history['momentum_conservation']) > 0:
+                    ax3.plot(diagnostics.history['momentum_conservation'], label='Momentum Conservation', color='purple')
+                ax3.set_title('Conservation Laws')
+                ax3.set_ylabel('Conservation Error')
+                ax3.set_xlabel('Step')
+                ax3.grid(True)
+                ax3.legend()
+            else:
+                ax3.text(0.5, 0.5, 'No conservation data', ha='center', va='center')
+                ax3.set_xlim(0, 1)
+                ax3.set_ylim(0, 1)
+            
+            # 4. V60物理參數
+            ax4 = fig.add_subplot(gs[1, 1])
+            if len(diagnostics.history['v60_flow_rate']) > 0:
+                ax4.plot(diagnostics.history['v60_flow_rate'], label='V60 Flow Rate', color='brown')
+                if len(diagnostics.history['extraction_efficiency']) > 0:
+                    ax4_twin = ax4.twinx()
+                    ax4_twin.plot(diagnostics.history['extraction_efficiency'], label='Extraction Efficiency', color='orange')
+                    ax4_twin.set_ylabel('Efficiency (%)', color='orange')
+                ax4.set_title('V60 Performance Metrics')
+                ax4.set_ylabel('Flow Rate', color='brown')
+                ax4.set_xlabel('Step')
+                ax4.grid(True)
+                ax4.legend(loc='upper left')
+            else:
+                ax4.text(0.5, 0.5, 'No V60 data', ha='center', va='center')
+                ax4.set_xlim(0, 1)
+                ax4.set_ylim(0, 1)
+            
+            # 5. 趨勢分析（合併兩個子圖）
+            ax5 = fig.add_subplot(gs[2, :])
+            if len(diagnostics.history['time_stability']) > 5:
+                steps = range(len(diagnostics.history['time_stability']))
+                
+                # 左Y軸：穩定性相關
+                ax5.plot(steps, diagnostics.history['time_stability'], 'b-', label='Stability', alpha=0.7)
+                if len(diagnostics.history['max_mach']) > 0:
+                    ax5.plot(steps, diagnostics.history['max_mach'], 'r-', label='Max Mach', alpha=0.7)
+                ax5.set_xlabel('Simulation Step')
+                ax5.set_ylabel('Stability & Mach', color='blue')
+                ax5.tick_params(axis='y', labelcolor='blue')
+                ax5.grid(True, alpha=0.3)
+                
+                # 右Y軸：物理參數
+                if len(diagnostics.history['v60_flow_rate']) > 0:
+                    ax5_twin = ax5.twinx()
+                    ax5_twin.plot(steps, diagnostics.history['v60_flow_rate'], 'g-', label='Flow Rate', alpha=0.7)
+                    ax5_twin.set_ylabel('Flow Rate & Physics', color='green')
+                    ax5_twin.tick_params(axis='y', labelcolor='green')
+                    
+                    # 組合圖例
+                    lines1, labels1 = ax5.get_legend_handles_labels()
+                    lines2, labels2 = ax5_twin.get_legend_handles_labels()
+                    lines = lines1 + lines2
+                    labels = labels1 + labels2
+                    ax5.legend(lines, labels, loc='upper left', fontsize=8)
+                else:
+                    ax5.legend(loc='upper left', fontsize=8)
+                    
+                ax5.set_title('LBM Diagnostics Trend Analysis')
+            else:
+                ax5.text(0.5, 0.5, 'Insufficient data for trend analysis', ha='center', va='center')
+                ax5.set_xlim(0, 1)
+                ax5.set_ylim(0, 1)
+            
+            plt.suptitle(f'LBM Comprehensive Diagnostics (t={simulation_time:.2f}s)', fontsize=14)
+            
+            filename = f'lbm_monitoring_step_{step_num:04d}.png'
+            plt.tight_layout()
+            plt.savefig(filename, dpi=300, bbox_inches='tight')
+            plt.close()
+            
+            return filename
+            
+        except Exception as e:
+            print(f"❌ LBM監控圖表生成失敗: {str(e)}")
+            return None

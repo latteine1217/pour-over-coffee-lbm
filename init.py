@@ -8,11 +8,44 @@ import taichi as ti
 import config
 import time
 
-# 強制使用CPU (基於性能測試結果)
-ti.init(arch=ti.cpu, 
-       kernel_profiler=True,
-       offline_cache=True)
-print("✓ 使用CPU計算 (性能測試證實CPU更優)")
+# 全域變數追蹤初始化狀態
+_taichi_initialized = False
+
+def initialize_taichi_once():
+    """統一的Taichi初始化函數 - 避免重複初始化"""
+    global _taichi_initialized
+    
+    if _taichi_initialized:
+        print("✓ Taichi已初始化，跳過重複初始化")
+        return
+    
+    # 基於性能測試結果，優先使用GPU，回落到CPU
+    try:
+        ti.init(
+            arch=ti.metal,              # 優先Metal/CUDA GPU
+            device_memory_GB=8.0,       # GPU記憶體限制提升至8GB
+            fast_math=True,             # 快速數學運算
+            advanced_optimization=True,  # 進階編譯優化
+            cpu_max_num_threads=8,      # CPU線程備用
+            debug=False,                # 關閉除錯提升性能
+            kernel_profiler=False,      # 禁用內核性能分析
+            offline_cache=False         # 禁用離線快取避免源代碼檢測問題
+        )
+        print("✓ 使用GPU計算 (Metal/CUDA加速)")
+        _taichi_initialized = True
+    except:
+        # GPU初始化失敗時回落到CPU
+        ti.init(
+            arch=ti.cpu, 
+            kernel_profiler=True,
+            offline_cache=True,
+            cpu_max_num_threads=8
+        )
+        print("✓ 使用CPU計算 (GPU不可用)")
+        _taichi_initialized = True
+
+# 模組載入時進行初始化
+initialize_taichi_once()
 
 def initialize_d3q19_simulation():
     """初始化完整的D3Q19手沖咖啡模擬系統 - 包含可移動咖啡粉"""
@@ -21,8 +54,8 @@ def initialize_d3q19_simulation():
     # 1. 創建LBM求解器
     print("--- 創建D3Q19 LBM求解器 ---")
     start_time = time.time()
-    from lbm_d3q19 import D3Q19_LBM
-    lbm_solver = D3Q19_LBM()
+    from lbm_solver import LBMSolver
+    lbm_solver = LBMSolver()
     print(f"    LBM求解器創建完成 ({time.time()-start_time:.2f}s)")
     
     # 2. 創建多相流處理器
@@ -53,8 +86,8 @@ def initialize_d3q19_simulation():
     # 6. 創建3D視覺化器 (支援粒子顯示)
     print("--- 創建3D視覺化器 ---")
     start_time = time.time()
-    from visualization_3d import Visualizer3D
-    visualizer = Visualizer3D(lbm_solver, multiphase, particle_system, pouring_system)
+    from visualizer import UnifiedVisualizer
+    visualizer = UnifiedVisualizer()
     print(f"    視覺化器創建完成 ({time.time()-start_time:.2f}s)")
     
     # 7. 初始化場變數
@@ -96,7 +129,7 @@ def initialize_d3q19_simulation():
     total_time = time.time() - start_time
     print(f"=== D3Q19初始化完成 ({total_time:.2f}s) ===")
     
-    return lbm_solver, multiphase, porous_solver, visualizer, particle_system, pouring_system
+    return lbm_solver, multiphase, visualizer, particle_system, pouring_system
 
 def print_d3q19_simulation_info():
     """打印D3Q19模擬參數信息"""
@@ -136,7 +169,7 @@ def run_performance_test():
     print("=== D3Q19性能測試 ===")
     
     # 初始化
-    lbm, multiphase, porous, vis = initialize_d3q19_simulation()
+    lbm, multiphase, vis, particles, pouring = initialize_d3q19_simulation()
     
     # 測試單步性能
     print("--- 測試單步性能 ---")
@@ -146,7 +179,7 @@ def run_performance_test():
     for i in range(test_steps):
         lbm.step()
         multiphase.step()
-        porous.step()
+        particles.update_particles(lbm.velocity)
     ti.sync()
     end_time = time.time()
     
@@ -164,22 +197,4 @@ def run_performance_test():
     # Taichi性能分析
     ti.profiler.print_kernel_profiler_info()
     
-    return lbm, multiphase, porous, vis
-
-# 向後兼容函數
-def initialize_simulation():
-    """向後兼容的初始化函數"""
-    print("=== 自動升級到D3Q19模擬 ===")
-    return initialize_d3q19_simulation()
-
-def print_simulation_info():
-    """向後兼容的信息顯示函數"""
-    print_d3q19_simulation_info()
-
-def initialize_fields():
-    """舊版向後兼容函數"""
-    print("=== 警告：使用舊版初始化接口 ===")
-    print("=== 建議使用 initialize_d3q19_simulation() ===")
-    
-    lbm, multiphase, porous, vis = initialize_d3q19_simulation()
-    return lbm  # 只返回LBM求解器以保持兼容性
+    return lbm, multiphase, vis, particles, pouring

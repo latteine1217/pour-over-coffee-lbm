@@ -140,7 +140,8 @@ class UnifiedVisualizer:
                     uz = self.lbm.u[i, j, k][2]
                     u_mag = ti.sqrt(ux*ux + uy*uy + uz*uz)
                     
-                    if phase > 0.5:  # 水相
+                    # 修復：使用更寬鬆的水相判定條件
+                    if phase > 0.1:  # 降低閾值，phi > 0.1 就算水相
                         total_water_mass += rho
                     else:  # 氣相
                         total_air_mass += rho

@@ -12,10 +12,10 @@ import numpy as np
 # 基礎LBM參數 - D3Q19模型
 # ==============================================
 
-# 網格設定 (平衡效率和精度)
-NX = 128
-NY = 128  
-NZ = 128
+# 網格設定 (平衡效率和精度) - 224³研究級精度，完整包含V60幾何
+NX = 224
+NY = 224  
+NZ = 224
 DX = 1.0         # 格點間距 (lattice units)
 DT = 1.0         # 時間步長 (lattice units)
 
@@ -53,26 +53,29 @@ WATER_VISCOSITY_90C = 3.15e-7          # m²/s (運動黏滯度)
 AIR_DENSITY_20C = 1.204                # kg/m³
 AIR_VISCOSITY_20C = 1.516e-5           # m²/s
 
-# V60幾何參數 (真實規格)
+# V60幾何參數 (真實規格) - 擴大物理域以完整包含
 CUP_HEIGHT = 0.085                     # m (8.5 cm)
 TOP_RADIUS = 0.058                     # m (11.6 cm直徑)
 BOTTOM_RADIUS = 0.010                  # m (2 cm出水孔，真實V60尺寸)
+
+# 物理域尺寸 - 擴大至14cm以完整包含V60 + 20%安全裕度
+PHYSICAL_DOMAIN_SIZE = 0.14            # m (14 cm, 包含11.6cm V60 + 裕度)
 
 # ==============================================
 # 科學的尺度轉換 (CFD專家修正版)
 # ==============================================
 
-# 特徵尺度選擇 - 基於實際V60幾何
-L_CHAR = CUP_HEIGHT                    # 特徵長度: 8.5 cm
+# 特徵尺度選擇 - 基於實際V60幾何和擴大物理域
+L_CHAR = CUP_HEIGHT                    # 特徵長度: 8.5 cm (V60高度)
 U_CHAR = 0.02                          # 特徵速度: 2 cm/s (保守估計)
 T_CHAR = L_CHAR / U_CHAR               # 特徵時間: 4.25s
 RHO_CHAR = WATER_DENSITY_90C           
 NU_CHAR = WATER_VISCOSITY_90C          
 
-# 格子尺度轉換 (基於NZ=128格點)
-SCALE_LENGTH = L_CHAR / NZ             # 0.664 mm/lu (合理的格子解析度)
+# 格子尺度轉換 (基於NZ=224格點，物理域14cm)
+SCALE_LENGTH = PHYSICAL_DOMAIN_SIZE / NZ  # 0.625 mm/lu (研究級解析度，完整V60包含)
 SCALE_VELOCITY = 0.01                  # lu/ts (保守初始值，策略2優化)
-SCALE_TIME = SCALE_LENGTH / SCALE_VELOCITY  # 66.4 ms/ts (加倍穩定性)
+SCALE_TIME = SCALE_LENGTH / SCALE_VELOCITY  
 SCALE_DENSITY = RHO_CHAR               
 
 # 網格物理尺寸
@@ -240,13 +243,22 @@ INLET_DIAMETER_RATIO = 0.2             # V60上徑的20%
 INLET_DIAMETER = 2 * TOP_RADIUS * INLET_DIAMETER_RATIO
 INLET_AREA = math.pi * (INLET_DIAMETER/2.0)**2
 
-# 入水速度計算
-INLET_VELOCITY_BASE = POUR_RATE_M3_S / INLET_AREA
-GRAVITY_VELOCITY = math.sqrt(2 * 9.81 * POUR_HEIGHT_CM/100)
-INLET_VELOCITY_PHYS = INLET_VELOCITY_BASE + GRAVITY_VELOCITY
+# 入水速度計算 (修正LBM穩定性)
+INLET_VELOCITY_BASE = POUR_RATE_M3_S / INLET_AREA  # 基於流量的速度 (0.009 m/s)
 
-# 格子單位入水速度
-INLET_VELOCITY = INLET_VELOCITY_PHYS * SCALE_TIME / SCALE_LENGTH
+# 重力加速修正 - 實際手沖過程中水流已接近穩定狀態，不需要完整自由落體速度
+# 使用較小的重力修正，保持LBM數值穩定性
+GRAVITY_CORRECTION = 0.05  # 5% 重力修正，而非完整自由落體
+INLET_VELOCITY_PHYS = INLET_VELOCITY_BASE * (1.0 + GRAVITY_CORRECTION)  # ~0.0095 m/s
+
+# 格子單位入水速度 - 確保 << 0.1 以維持LBM穩定性
+INLET_VELOCITY_LU = INLET_VELOCITY_PHYS * SCALE_TIME / SCALE_LENGTH
+INLET_VELOCITY = min(0.05, INLET_VELOCITY_LU)  # 強制限制在穩定範圍內
+
+# 速度安全檢查
+if INLET_VELOCITY > 0.1:
+    print(f"⚠️  INLET_VELOCITY={INLET_VELOCITY:.3f} > 0.1，自動限制至0.05")
+    INLET_VELOCITY = 0.05
 
 # ==============================================
 # 模擬控制參數

@@ -68,8 +68,9 @@ class FilterPaperSystem:
         print(f"  設計特點:")
         print(f"    └─ 完整圓錐形濾紙（非平底）")
         print(f"    └─ 濾杯與濾紙間2mm排水/排氣空隙")
-        print(f"    └─ V60底部完全封閉（無直接outlet）")
-        print(f"    └─ Outlet設置在計算域邊界")
+        print(f"    └─ V60底部設置為開放大洞（正確設計）")
+        print(f"    └─ 底部開口直徑: {config.BOTTOM_RADIUS*2*100:.1f}cm")
+        print(f"    └─ 流體通過濾紙後從底部開口流出")
     
     @ti.kernel
     def _setup_v60_geometry(self):
@@ -98,9 +99,12 @@ class FilterPaperSystem:
             # 設置固體邊界
             is_solid = False
             
-            # 1. V60底部完全封閉（移除平底outlet）
+            # 1. V60底部設置為開放大洞（正確的V60設計）
             if z <= v60_bottom_z:
-                is_solid = True  # 底部完全封閉，不設outlet
+                # V60底部應該是開放的大洞，只有壁厚部分是固體
+                if radius_from_center > bottom_radius_lu:
+                    is_solid = True  # 底部外圍的支撐結構
+                # 底部中心的開口區域保持為流體（is_solid = False）
             elif z <= v60_top_z:
                 # 錐形側壁 - 考慮與濾紙的空隙
                 height_ratio = (z - v60_bottom_z) / cup_height_lu

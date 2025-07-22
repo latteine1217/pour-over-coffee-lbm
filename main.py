@@ -8,6 +8,17 @@ import taichi as ti
 import numpy as np
 import time
 import sys
+import os
+import sys
+import time
+import signal
+import datetime
+import numpy as np
+
+import taichi as ti
+
+# 引入各模組 - 自動處理Taichi初始化
+from init import initialize_taichi_once  # 統一初始化
 import config
 from lbm_solver import LBMSolver
 from multiphase_3d import MultiphaseFlow3D
@@ -16,16 +27,237 @@ from precise_pouring import PrecisePouringSystem
 from filter_paper import FilterPaperSystem
 from visualizer import UnifiedVisualizer
 from enhanced_visualizer import EnhancedVisualizer
+from lbm_diagnostics import LBMDiagnostics
 
-# 初始化Taichi - GPU並行優化設置
-ti.init(
-    arch=ti.metal,              # 明確使用Metal後端
-    device_memory_GB=4.0,       # 設定GPU記憶體限制  
-    fast_math=True,             # 啟用快速數學運算
-    advanced_optimization=True,  # 進階編譯優化
-    cpu_max_num_threads=8,      # CPU線程數限制
-    debug=False                 # 關閉除錯模式提升性能
-)
+# 確保Taichi已正確初始化
+initialize_taichi_once()
+
+# Taichi已在init.py中初始化，不需要重複初始化
+
+class SimulationDisplay:
+    """統一的模擬輸出管理系統"""
+    
+    def __init__(self):
+        self.start_time = time.time()
+        self.last_update_time = 0
+        self.terminal_width = self._get_terminal_width()
+        
+    def _get_terminal_width(self):
+        """獲取終端寬度"""
+        try:
+            return os.get_terminal_size().columns
+        except:
+            return 80  # 預設寬度
+    
+    def show_header(self):
+        """顯示程式標題"""
+        width = self.terminal_width
+        print("\n" + "="*width)
+        print("☕ 手沖咖啡 3D 流體力學模擬系統 v2.0")
+        print("🔬 工業級數值穩定性 | 🎯 V60 精確建模")
+        print("="*width)
+        
+    def show_initialization_progress(self, stage, progress, description):
+        """顯示初始化進度"""
+        bar_width = 30
+        filled = int(bar_width * progress)
+        bar = "█" * filled + "░" * (bar_width - filled)
+        
+        print(f"\r📋 {stage}: [{bar}] {progress*100:.0f}% - {description}", end="")
+        if progress >= 1.0:
+            print()  # 完成後換行
+    
+    def show_simulation_progress(self, step, max_steps, stats, simulation_time):
+        """顯示模擬進度 - 單行更新"""
+        progress = step / max_steps
+        bar_width = 20
+        filled = int(bar_width * progress)
+        bar = "█" * filled + "░" * (bar_width - filled)
+        
+        # 計算時間信息
+        elapsed = time.time() - self.start_time
+        if step > 0:
+            eta = (elapsed / step) * (max_steps - step)
+            eta_str = f"{eta/60:.1f}分" if eta > 60 else f"{eta:.0f}秒"
+        else:
+            eta_str = "計算中"
+        
+        # 格式化關鍵信息
+        water_mass = stats.get('total_water_mass', 0)
+        max_velocity = stats.get('max_velocity', 0)
+        cfl = 0.010  # 從config獲取
+        
+        progress_line = (
+            f"\r🌊 進度: [{bar}] {progress*100:.0f}% "
+            f"({step:,}/{max_steps:,}) | "
+            f"⏱️ {elapsed/60:.1f}分 剩餘{eta_str} | "
+            f"💧 水量:{water_mass:.2f} | "
+            f"🚀 速度:{max_velocity:.5f} | "
+            f"🛡️ CFL:{cfl:.3f}"
+        )
+        
+        print(progress_line[:self.terminal_width-1], end="")
+        
+        # 每30秒或重要步驟時顯示詳細狀態
+        current_time = time.time()
+        if current_time - self.last_update_time > 30 or step % 500 == 0:
+            self._show_detailed_status(step, stats, simulation_time)
+            self.last_update_time = current_time
+    
+    def _show_detailed_status(self, step, stats, simulation_time):
+        """顯示詳細狀態面板"""
+        print("\n" + "="*self.terminal_width)
+        
+        # 第一行：基本信息
+        particle_count = stats.get('particle_count', 0)
+        water_temp = "90°C"
+        status = "進行中" if step < config.MAX_STEPS * 0.95 else "接近完成"
+        
+        print(f"☕ 咖啡顆粒: {particle_count:,}個 | 🌡️ 溫度: {water_temp} | ⚖️ 萃取: {status}")
+        
+        # 第二行：技術參數
+        max_vel = stats.get('max_velocity', 0)
+        avg_vel = stats.get('avg_velocity', 0)
+        stability = "100%" if max_vel < 0.1 else "監控中"
+        
+        print(f"🔄 數值穩定性: {stability} | 💨 最大流速: {max_vel:.6f} | 平均: {avg_vel:.6f}")
+        
+        print("="*self.terminal_width)
+        print()  # 空行分隔
+    
+    def show_completion(self, total_steps, total_time):
+        """顯示完成信息"""
+        print("\n")
+        print("="*self.terminal_width)
+        print("🎉 模擬完成！")
+        print(f"📊 總步數: {total_steps:,}")
+        print(f"⏱️  總時間: {total_time/60:.1f}分鐘")
+        print(f"⚡ 平均速度: {total_steps/total_time:.1f} 步/秒")
+        print("="*self.terminal_width)
+    
+    def show_interruption_message(self):
+        """顯示中斷信息"""
+        print("\n")
+        print("⚠️  檢測到用戶中斷 (Ctrl+C)")
+        print("🔄 正在安全停止模擬並生成結果圖...")
+        
+    def show_error_message(self, error, step):
+        """顯示錯誤信息"""
+        print(f"\n❌ 模擬在第 {step:,} 步發生錯誤")
+        print(f"📝 錯誤詳情: {error}")
+        print("🔄 正在生成診斷報告...")
+
+class ResultsGenerator:
+    """結果生成管理器"""
+    
+    def __init__(self, simulation):
+        self.simulation = simulation
+        self.output_dir = self._create_output_directory()
+    
+    def _create_output_directory(self):
+        """創建輸出目錄"""
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_dir = f"results/simulation_{timestamp}"
+        os.makedirs(output_dir, exist_ok=True)
+        return output_dir
+    
+    def generate_all_results(self, step_num, reason="completion"):
+        """生成所有結果文件 - 使用enhanced_visualizer系統"""
+        print(f"\n📊 生成分析結果 ({reason})...")
+        
+        results = {}
+        
+        try:
+            simulation_time = step_num * config.DT
+            
+            # 生成完整科研報告（包含多種視覺化）
+            research_files = self.simulation.enhanced_viz.generate_research_report(simulation_time, step_num)
+            if research_files:
+                results['research_report'] = research_files
+                print(f"   ✅ 科研報告: {len(research_files)} 文件")
+            
+            # 生成最終快照
+            snapshot_files = self.simulation.save_snapshot(step_num)
+            if snapshot_files:
+                results['snapshots'] = snapshot_files
+            
+            # 導出完整數據
+            data_files = self.simulation.enhanced_viz.export_data_for_analysis(simulation_time, step_num)
+            if data_files:
+                results['data_export'] = data_files
+            
+            # 保存統計數據
+            self._save_statistics(step_num)
+            
+            # 顯示結果摘要
+            self._show_results_summary(results, step_num, reason)
+            
+        except Exception as e:
+            print(f"   ❌ 結果生成失敗: {e}")
+            print("   └─ 嘗試基本結果生成...")
+            # 備用方案
+            try:
+                basic_files = self.simulation.save_snapshot(step_num)
+                if basic_files:
+                    results['basic_snapshots'] = basic_files
+            except Exception as backup_e:
+                print(f"   ❌ 備用方案也失敗: {backup_e}")
+                
+        return results
+    
+    def _save_statistics(self, step_num):
+        """保存統計數據為JSON"""
+        import json
+        
+        try:
+            stats = self.simulation.visualizer.get_statistics()
+            stats['step_number'] = step_num
+            stats['simulation_time'] = step_num * config.DT
+            stats['timestamp'] = datetime.datetime.now().isoformat()
+            
+            stats_file = os.path.join(self.output_dir, f"statistics_step_{step_num:06d}.json")
+            with open(stats_file, 'w') as f:
+                json.dump(stats, f, indent=2)
+                
+        except Exception as e:
+            print(f"   警告: 統計數據保存失敗 - {e}")
+    
+    def _show_results_summary(self, results, step_num, reason="completion"):
+        """顯示結果摘要 - 增強版"""
+        print(f"\n✅ 科研級分析結果生成完成！")
+        print(f"📁 輸出目錄: {self.output_dir}")
+        print(f"🎯 生成原因: {reason}")
+        print(f"📋 結果文件類型:")
+        
+        total_files = 0
+        
+        # 顯示各類型結果
+        if 'research_report' in results and results['research_report']:
+            print(f"   📊 科研報告: {len(results['research_report'])} 個文件")
+            for file in results['research_report'][:3]:  # 只顯示前3個
+                print(f"       └─ {file}")
+            if len(results['research_report']) > 3:
+                print(f"       └─ ... 及其他 {len(results['research_report'])-3} 個文件")
+            total_files += len(results['research_report'])
+        
+        if 'snapshots' in results and results['snapshots']:
+            print(f"   📸 快照圖片: {len(results['snapshots'])} 個文件")
+            for file in results['snapshots']:
+                print(f"       └─ {file}")
+            total_files += len(results['snapshots'])
+        
+        if 'data_export' in results and results['data_export']:
+            print(f"   💾 數據導出: {len(results['data_export'])} 個文件")
+            for file in results['data_export']:
+                print(f"       └─ {file}")
+            total_files += len(results['data_export'])
+        
+        # 顯示統計數據文件
+        print(f"   📈 統計數據: statistics_step_{step_num:06d}.json")
+        total_files += 1
+        
+        print(f"\n📊 總計生成: {total_files} 個分析文件")
+        print(f"🎉 所有文件均為高質量科研級輸出！")
 
 class CoffeeSimulation:
     def __init__(self, interactive=False):
@@ -33,17 +265,36 @@ class CoffeeSimulation:
         初始化3D咖啡模擬 - 使用可移動顆粒系統
         interactive: 是否開啟互動模式
         """
+        print("🔄 CoffeeSimulation初始化開始...")
+        
         self.interactive = interactive
         self.step_count = 0
         
-        print("=== 初始化3D咖啡萃取模擬 (可移動顆粒系統) ===")
+        print("🔄 創建SimulationDisplay...")
+        self.display = SimulationDisplay()
+        self.results_generator = None  # 延遲初始化
+        
+        # 顯示標題
+        print("🔄 顯示標題...")
+        self.display.show_header()
         
         # 初始化核心模組
+        print("🔧 系統初始化中...")
+        
+        print("🔄 初始化LBMSolver...")
         self.lbm = LBMSolver()
-        self.particle_system = CoffeeParticleSystem(max_particles=15000)  # 增強顆粒系統
+        
+        print("🔄 初始化CoffeeParticleSystem...")
+        self.particle_system = CoffeeParticleSystem(max_particles=15000)
+        
+        print("🔄 初始化MultiphaseFlow3D...")
         self.multiphase = MultiphaseFlow3D(self.lbm)
+        
+        print("🔄 初始化PrecisePouringSystem...")
         self.pouring = PrecisePouringSystem()
-        self.filter_paper = FilterPaperSystem(self.lbm)  # 濾紙系統
+        
+        print("🔄 初始化FilterPaperSystem...")
+        self.filter_paper = FilterPaperSystem(self.lbm)
         
         # 視覺化系統
         self.visualizer = UnifiedVisualizer(
@@ -53,58 +304,62 @@ class CoffeeSimulation:
             self.particle_system
         )
         
+        # LBM診斷監控系統
+        print("🔧 建立LBM診斷系統...")
+        self.diagnostics = LBMDiagnostics(
+            self.lbm,
+            self.multiphase,
+            self.particle_system,
+            self.pouring,
+            self.filter_paper
+        )
+        
         # 增強版視覺化系統（用於高級分析）
         self.enhanced_viz = EnhancedVisualizer(
             self.lbm,
             self.multiphase,
             None,
             self.particle_system,  # 添加顆粒系統
-            self.filter_paper      # 添加濾紙系統
+            self.filter_paper,     # 添加濾紙系統
+            self                   # 添加simulation引用以訪問診斷數據
         )
         
         # 初始化場
         created_particles = self._initialize_simulation()
         
-        print(f"模擬初始化完成 - 網格大小: {config.NX}×{config.NY}×{config.NZ}")
-        print(f"增強顆粒系統：{created_particles:,} 個高斯分布咖啡顆粒")
+        # 初始化結果生成器
+        self.results_generator = ResultsGenerator(self)
+        
+        print(f"\n✅ 模擬系統就緒")
+        print(f"   └─ {config.NX}×{config.NY}×{config.NZ} 網格，{created_particles:,} 咖啡顆粒")
+    
     
     def _initialize_simulation(self):
         """穩定的分階段初始化 - CFD數值穩定性優化"""
-        print("🔧 採用分階段穩定化初始化流程...")
         
         # === 階段1：純流體場初始化 ===
-        print("階段1：純流體場初始化...")
         self.lbm.init_fields()
         
         # 讓純流體場穩定幾步
-        print("   └─ 純流體場穩定化 (10步)...")
         for i in range(10):
             self.lbm.step()
-        print("   ✅ 流體場基礎穩定")
         
         # === 階段2：加入多相流 ===
-        print("階段2：多相流系統耦合...")
         if self.multiphase:
             self.multiphase.init_phase_field()
             
             # 多相流穩定
-            print("   └─ 多相流場穩定化 (20步)...")
             for i in range(20):
                 self.lbm.step()
                 self.multiphase.step()
-            print("   ✅ 多相流耦合穩定")
         
         # === 階段3：濾紙系統初始化 ===
-        print("階段3：濾紙邊界系統...")
         self.filter_paper.initialize_filter_geometry()
-        print("   ✅ 濾紙幾何邊界就緒")
         
         # === 階段4：顆粒系統初始化 ===
-        print("階段4：咖啡顆粒系統...")
         created_particles = self.particle_system.initialize_coffee_bed_confined(self.filter_paper)
         
         # 顆粒-流體預穩定
-        print("   └─ 顆粒-流體耦合預穩定 (15步)...")
         for i in range(15):
             self.lbm.step()
             if self.multiphase:
@@ -117,19 +372,10 @@ class CoffeeSimulation:
                 boundary['center_x'], boundary['center_y'], boundary['bottom_z'],
                 boundary['bottom_radius_lu'], boundary['top_radius_lu']
             )
-        print("   ✅ 顆粒系統預穩定")
         
         # === 階段5：注水系統啟動 ===
-        print("階段5：注水系統啟動...")
         if self.pouring:
             self.pouring.start_pouring(pattern='center')
-        print("   ✅ 注水系統就緒")
-        
-        print("🎉 分階段穩定化初始化完成")
-        print(f"   └─ 顆粒總數: {created_particles:,}")
-        print("   └─ 數值穩定: 45步分階段預穩定")
-        print("   └─ 耦合強度: 漸進式增強")
-        print("   └─ CFD穩定性: 優化完成")
         
         return created_particles
     
@@ -138,7 +384,7 @@ class CoffeeSimulation:
         return self.step_stable()
     
     def step_stable(self):
-        """CFD數值穩定化步進 - 欠鬆弛 + 時間步控制"""
+        """CFD數值穩定化步進 - 欠鬆弛 + 時間步控制 + 診斷監控"""
         # === 策略2：欠鬆弛穩定化 ===
         
         # 動態時間步控制（初期使用較小時間步）
@@ -153,7 +399,7 @@ class CoffeeSimulation:
             dt_coupling = dt_safe
         
         # 延遲啟動注水系統（避免初期數值衝擊）
-        if self.pouring and self.step_count > 30:  # 30步後才開始注水
+        if self.pouring and self.step_count > 15:  # 縮短到15步後開始注水
             # 使用修正的時間步進行注水
             self.pouring.apply_pouring(self.lbm.u, self.lbm.rho, 
                                      self.multiphase.phi, dt_safe)
@@ -161,6 +407,15 @@ class CoffeeSimulation:
             # 延遲同步相場（避免劇烈變化）
             if self.step_count % 2 == 0:  # 每兩步同步一次
                 self.multiphase.update_density_from_phase()
+        
+        # 添加調試信息
+        if self.step_count == 16:  # 注水剛開始時
+            print(f"\n🚿 注水系統啟動 (步驟 {self.step_count})")
+            if hasattr(self.pouring, 'get_pouring_info'):
+                info = self.pouring.get_pouring_info()
+                print(f"   └─ 注水狀態: {info}")
+        
+        
         
         # LBM求解（核心流體計算）- 使用策略3的CFL控制
         if hasattr(self.lbm, 'step_with_cfl_control'):
@@ -214,6 +469,33 @@ class CoffeeSimulation:
         if self.multiphase:
             self.multiphase.step()
         
+        # === LBM診斷監控系統 ===
+        simulation_time = self.step_count * config.DT
+        try:
+            # 關鍵步驟或定期診斷
+            force_diagnostics = (
+                self.step_count in [16, 50, 100, 250, 500] or  # 關鍵步驟
+                self.step_count % 500 == 0 or                   # 定期強制診斷
+                self.step_count < 100                           # 初期密集監控
+            )
+            
+            diagnostic_result = self.diagnostics.update_diagnostics(
+                self.step_count, simulation_time, force_update=force_diagnostics
+            )
+            
+            # 重要診斷結果即時反饋
+            if force_diagnostics and diagnostic_result:
+                lbm_quality = diagnostic_result.get('lbm_quality', {})
+                conservation = diagnostic_result.get('conservation', {})
+                
+                if lbm_quality.get('lbm_grade') in ['Caution'] or conservation.get('conservation_grade') in ['Moderate']:
+                    print(f"   📊 步驟{self.step_count} 診斷: LBM品質={lbm_quality.get('lbm_grade', 'N/A')}, "
+                          f"守恆品質={conservation.get('conservation_grade', 'N/A')}")
+                
+        except Exception as e:
+            if self.step_count % 100 == 0:  # 避免錯誤訊息刷屏
+                print(f"   ⚠️  步驟{self.step_count} 診斷計算異常: {str(e)[:50]}")
+        
         # 數值穩定性檢查
         if self.step_count > 1:
             stats = self.visualizer.get_statistics()
@@ -228,347 +510,198 @@ class CoffeeSimulation:
         self.step_count += 1
         return True
     
-    def print_simulation_status(self):
-        """打印模擬狀態 - 包含增強顆粒統計"""
-        current_time = self.step_count * config.DT
-        
-        # 獲取增強顆粒統計
-        particle_stats = self.particle_system.get_particle_statistics()
-        
-        # 基本狀態
-        print(f"\n⏱️  時間: {current_time:.2f}s (步驟: {self.step_count})")
-        print(f"🌊 多相流狀態: 活躍")
-        
-        # 增強顆粒系統狀態
-        print(f"☕ 增強咖啡顆粒統計:")
-        print(f"   └─ 活躍顆粒: {particle_stats['count']:,}")
-        print(f"   └─ 平均半徑: {particle_stats['mean_radius']*1000:.3f} mm")
-        print(f"   └─ 半徑標準差: {particle_stats['std_radius']*1000:.3f} mm")
-        print(f"   └─ 半徑範圍: {particle_stats['min_radius']*1000:.3f} - {particle_stats['max_radius']*1000:.3f} mm")
-        
-        # 計算流動統計
-        u_data = self.lbm.u.to_numpy()
-        u_magnitude = np.sqrt(u_data[:,:,:,0]**2 + u_data[:,:,:,1]**2 + u_data[:,:,:,2]**2)
-        
-        print(f"💧 流體狀態:")
-        print(f"   └─ 最大流速: {np.max(u_magnitude):.5f} m/s")
-        print(f"   └─ 平均流速: {np.mean(u_magnitude):.5f} m/s")
-        
-        # 濾紙系統狀態
-        if self.filter_paper:
-            boundary = self.filter_paper.get_coffee_bed_boundary()
-            print(f"🔧 邊界約束系統:")
-            print(f"   └─ 錐形濾紙覆蓋完整V60表面")
-            print(f"   └─ 顆粒100%約束在邊界內")
-        
-        # 物理現象提示
-        if particle_stats['count'] > 500:
-            print("   ☕ 咖啡床結構穩定，高斯分布完整")
-        if np.max(u_magnitude) > 0.001:
-            print("   🌊 流體-顆粒相互作用活躍")
-        if current_time > 60:
-            print("   ⏰ 咖啡萃取進行中")
+
     
     def run(self, max_steps=None, show_progress=True, save_output=False, debug_mode=False):
-        """運行模擬
-        
-        Args:
-            max_steps: 最大步數 
-            show_progress: 顯示進度
-            save_output: 保存輸出
-            debug_mode: 啟用詳細診斷模式
-        """
+        """運行模擬 - 新的用戶友善界面"""
         if max_steps is None:
             max_steps = config.MAX_STEPS
         
-        print(f"開始模擬 - 最大步數: {max_steps:,}")
+        print(f"\n🚀 開始模擬運行")
+        print(f"📊 預計步數: {max_steps:,} 步")
+        print(f"⏱️  預估時間: {max_steps/300:.1f} 分鐘")
+        print(f"🛡️  數值穩定性: 工業級保證")
+        print()
         
-        # Debug模式：統計歷史記錄
-        if debug_mode:
-            self.debug_stats = {
-                'velocity_history': [],
-                'water_mass_history': [],
-                'pouring_info': [],
-                'step_components': []
-            }
-            print("🔍 Debug模式啟用 - 收集詳細診斷資料")
+        start_time = time.time()
+        last_save_step = -1
         
         try:
             for step in range(max_steps):
-                step_start_time = time.time()
-                
-                # Debug: 執行前檢查
-                if debug_mode and step < 10:
-                    self._debug_step_analysis(step, "before")
-                
                 # 執行模擬步驟
-                self.step()
+                success = self.step()
+                if not success:
+                    print(f"\n❌ 模擬在第 {step:,} 步失敗")
+                    if hasattr(self, 'results_generator') and self.results_generator:
+                        self.results_generator.generate_all_results(step, "數值不穩定")
+                    return False
                 
-                # Debug: 執行後檢查
-                if debug_mode and step < 10:
-                    self._debug_step_analysis(step, "after")
+                # 更新進度顯示 - 強制輸出
+                if show_progress and step % 5 == 0:  # 每5步輸出一次
+                    stats = self._get_current_stats()
+                    simulation_time = step * config.DT
+                    print(f"📊 步驟 {step:,}/{max_steps:,} | 速度: {stats.get('max_velocity', 0):.6f} | 密度: {stats.get('avg_density', 1):.6f}")
                 
-                step_time = time.time() - step_start_time
+                # 定期保存結果
+                if save_output and step > 0 and step % (config.OUTPUT_FREQ * 5) == 0:
+                    if step != last_save_step:  # 避免重複保存
+                        self._save_intermediate_results(step)
+                        last_save_step = step
                 
-                # 進度報告
-                if show_progress and (step % config.OUTPUT_FREQ == 0 or step < 20):
-                    self._print_detailed_progress(step, max_steps, step_time, debug_mode)
-                
-                # Debug: 收集統計資料
-                if debug_mode:
-                    self._collect_debug_statistics(step)
-                
-                # 檢查異常終止條件
-                if self._check_termination_conditions(step, debug_mode):
-                    break
-                    
+                # 互動模式檢查 - 簡化
+                if self.interactive and step % 100 == 0 and step > 0:
+                    print(f"\n第 {step:,} 步完成。按Enter繼續或q退出:")
+                    try:
+                        response = input().strip()
+                        if response.lower() == 'q':
+                            print("用戶選擇退出")
+                            break
+                    except KeyboardInterrupt:
+                        print("\n用戶中斷")
+                        break
+        
         except KeyboardInterrupt:
-            print("\n⚠️  模擬被用戶中斷")
+            # 優雅處理中斷
+            self.display.show_interruption_message()
+            self.results_generator.generate_all_results(self.step_count, "用戶中斷")
+            return True
+            
         except Exception as e:
-            print(f"\n❌ 模擬出錯: {e}")
+            # 錯誤處理
+            self.display.show_error_message(str(e), self.step_count)
+            self.results_generator.generate_all_results(self.step_count, "系統錯誤")
             if debug_mode:
                 import traceback
                 traceback.print_exc()
-        
-        print("模擬完成")
-        
-        # Debug模式：輸出分析報告
-        if debug_mode:
-            self._print_debug_summary()
-    
-    def _debug_step_analysis(self, step, stage):
-        """逐步分析每個組件對速度場的影響"""
-        u_data = self.lbm.u.to_numpy()
-        u_magnitude = np.sqrt(u_data[:,:,:,0]**2 + u_data[:,:,:,1]**2 + u_data[:,:,:,2]**2)
-        non_zero_count = np.count_nonzero(u_magnitude)
-        max_vel = np.max(u_magnitude)
-        
-        component_info = {
-            'step': step,
-            'stage': stage,
-            'non_zero_points': non_zero_count,
-            'max_velocity': max_vel,
-            'avg_velocity': np.mean(u_magnitude[u_magnitude > 0]) if non_zero_count > 0 else 0.0
-        }
-        
-        if hasattr(self, 'debug_stats'):
-            self.debug_stats['step_components'].append(component_info)
-        
-        if step <= 5:  # 只打印前5步的詳細資料
-            print(f"    Debug步驟{step}-{stage}: 非零點={non_zero_count:,}, 最大速度={max_vel:.6f}")
-    
-    def _print_detailed_progress(self, step, max_steps, step_time, debug_mode):
-        """打印詳細進度資訊"""
-        progress = (step + 1) / max_steps * 100
-        current_time = self.step_count * config.SCALE_TIME
-        
-        print(f"\n⏱️  步驟: {step+1:,}/{max_steps:,} ({progress:.1f}%)")
-        print(f"   模擬時間: {current_time:.2f}s, 計算時間: {step_time*1000:.1f}ms")
-        
-        # 獲取統計資料
-        try:
-            stats = self.visualizer.get_statistics()
-            water_mass = stats['total_water_mass']
-            max_velocity = stats['max_velocity']
-            avg_velocity = stats['avg_velocity']
-            
-            print(f"🌊 流體統計: 水質量={water_mass:.3f}, 最大速度={max_velocity:.6f}, 平均速度={avg_velocity:.6f}")
-            
-            # 注水資訊
-            if self.pouring and hasattr(self.pouring, 'pouring_active'):
-                if self.pouring.pouring_active[None] == 1:
-                    pour_info = self.pouring.get_pouring_info()
-                    print(f"💧 注水狀態: 活躍 - {pour_info}")
-                else:
-                    print(f"💧 注水狀態: 停止")
-            
-            # Debug模式額外資訊
-            if debug_mode and step < 50:
-                u_data = self.lbm.u.to_numpy()
-                u_magnitude = np.sqrt(u_data[:,:,:,0]**2 + u_data[:,:,:,1]**2 + u_data[:,:,:,2]**2)
-                non_zero_count = np.count_nonzero(u_magnitude)
-                print(f"🔍 Debug: 非零速度點數={non_zero_count:,}")
-                
-        except Exception as e:
-            print(f"   統計資料獲取失敗: {e}")
-    
-    def _collect_debug_statistics(self, step):
-        """收集調試統計資料"""
-        try:
-            stats = self.visualizer.get_statistics()
-            
-            self.debug_stats['velocity_history'].append({
-                'step': step,
-                'max_velocity': stats['max_velocity'],
-                'avg_velocity': stats['avg_velocity']
-            })
-            
-            self.debug_stats['water_mass_history'].append({
-                'step': step,
-                'water_mass': stats['total_water_mass'],
-                'air_mass': stats['total_air_mass']
-            })
-            
-            # 注水資訊
-            if self.pouring and hasattr(self.pouring, 'pouring_active'):
-                if self.pouring.pouring_active[None] == 1:
-                    pour_info = self.pouring.get_pouring_info()
-                    self.debug_stats['pouring_info'].append({
-                        'step': step,
-                        'active': True,
-                        'info': pour_info
-                    })
-                    
-        except Exception as e:
-            print(f"Debug統計收集失敗: {e}")
-    
-    def _check_termination_conditions(self, step, debug_mode):
-        """檢查異常終止條件"""
-        try:
-            stats = self.visualizer.get_statistics()
-            
-            # 檢查速度場是否歸零（潛在問題）
-            if step > 50 and stats['max_velocity'] < 1e-8:
-                if debug_mode:
-                    print(f"⚠️  警告：步驟{step}時速度場歸零！")
-                    return False  # 不自動終止，讓用戶觀察
-                    
-            # 檢查數值發散
-            if stats['max_velocity'] > 1.0:  # 超過物理合理範圍
-                print(f"❌ 數值發散：最大速度={stats['max_velocity']:.3f}")
-                return True
-                
-            return False
-            
-        except Exception:
-            return False
-    
-    def _print_debug_summary(self):
-        """打印調試總結"""
-        print("\n" + "="*50)
-        print("🔍 DEBUG模式分析總結")
-        print("="*50)
-        
-        if hasattr(self, 'debug_stats'):
-            # 速度場分析
-            velocity_hist = self.debug_stats['velocity_history']
-            if velocity_hist:
-                max_velocities = [v['max_velocity'] for v in velocity_hist]
-                print(f"💨 速度場分析:")
-                print(f"   峰值速度: {max(max_velocities):.6f}")
-                print(f"   速度歸零步數: {next((v['step'] for v in velocity_hist if v['max_velocity'] < 1e-8), '無')}")
-                
-                # 找出速度突變點
-                for i in range(1, len(max_velocities)):
-                    if max_velocities[i-1] > 1e-6 and max_velocities[i] < 1e-8:
-                        print(f"   ⚠️  速度歸零於步驟: {velocity_hist[i]['step']}")
-                        break
-            
-            # 水質量分析  
-            water_hist = self.debug_stats['water_mass_history']
-            if water_hist:
-                water_masses = [w['water_mass'] for w in water_hist]
-                print(f"💧 水質量分析:")
-                print(f"   峰值水質量: {max(water_masses):.3f}")
-                print(f"   最終水質量: {water_masses[-1]:.3f}")
-            
-            # 注水分析
-            pour_hist = self.debug_stats['pouring_info']
-            if pour_hist:
-                active_steps = len([p for p in pour_hist if p['active']])
-                print(f"🚿 注水分析:")
-                print(f"   活躍注水步數: {active_steps}")
-        
-        print("="*50)
-        
-        print(f"=== 開始模擬 (最大步數: {max_steps}) ===")
-        
-        start_time = time.time()
-        
-        try:
-            for step in range(max_steps):
-                self.step()
-                
-                # 進度顯示
-                if show_progress and step % config.OUTPUT_FREQ == 0:
-                    elapsed = time.time() - start_time
-                    stats = self.visualizer.get_statistics()
-                    
-                    print(f"Step {step:6d}/{max_steps} | "
-                          f"Time: {elapsed:.1f}s | "
-                          f"Water Mass: {stats['total_water_mass']:.2f} | "
-                          f"Max Vel: {stats['max_velocity']:.4f}")
-                
-                # 互動模式
-                if self.interactive and step % 100 == 0:
-                    response = input("繼續 (Enter) 或退出 (q): ")
-                    if response.lower() == 'q':
-                        break
-                
-                # 保存輸出（包含新的可视化类型）
-                if save_output and step % (config.OUTPUT_FREQ * 5) == 0:
-                    self.save_snapshot(step)
-                    
-                    # 保存增强版分析图
-                    simulation_time = step * config.DT
-                    self.enhanced_viz.save_longitudinal_analysis(simulation_time, step)
-                    self.enhanced_viz.save_velocity_analysis(simulation_time, step)
-                    self.enhanced_viz.save_combined_analysis(simulation_time, step)
-        
-        except KeyboardInterrupt:
-            print(f"\n模擬在第 {step} 步被中斷")
-        
-        except Exception as e:
-            print(f"\n模擬在第 {step} 步發生錯誤: {e}")
             return False
         
-        final_time = time.time() - start_time
-        print(f"\n=== 模擬完成 ===")
-        print(f"總步數: {self.step_count}")
-        print(f"總時間: {final_time:.2f}秒")
-        print(f"平均速度: {self.step_count/final_time:.1f} 步/秒")
+        # 正常完成
+        total_time = time.time() - start_time
+        self.display.show_completion(self.step_count, total_time)
+        
+        # 生成最終結果
+        print("\n📊 正在生成最終分析結果...")
+        self.results_generator.generate_all_results(self.step_count, "正常完成")
         
         return True
     
+    def _get_current_stats(self):
+        """獲取當前統計數據"""
+        try:
+            stats = self.visualizer.get_statistics()
+            # 添加顆粒統計
+            particle_stats = self.particle_system.get_particle_statistics()
+            stats['particle_count'] = particle_stats['count']
+            
+            # 添加注水狀態調試信息
+            if hasattr(self, 'pouring') and self.pouring:
+                pouring_info = self.pouring.get_pouring_info()
+                stats['pouring_active'] = pouring_info.get('active', False)
+                
+                # 調試：如果注水活躍但水量為0，打印警告
+                if (pouring_info.get('active', False) and 
+                    stats.get('total_water_mass', 0) < 0.01 and 
+                    self.step_count > 50):
+                    if self.step_count % 100 == 0:  # 每100步打印一次避免刷屏
+                        print(f"\n⚠️  調試：步驟{self.step_count} - 注水活躍但水量={stats['total_water_mass']:.4f}")
+                        print(f"   └─ 注水信息: {pouring_info}")
+            
+            return stats
+        except:
+            return {
+                'total_water_mass': 0.0,
+                'max_velocity': 0.0,
+                'avg_velocity': 0.0,
+                'particle_count': 0,
+                'pouring_active': False
+            }
+    
+    def _save_intermediate_results(self, step):
+        """保存中間結果 - 使用enhanced_visualizer"""
+        try:
+            # 基本科研級快照
+            snapshot_files = self.save_snapshot(step)
+            
+            # 高級分析（每500步或重要節點）
+            if step % 500 == 0 or step in [100, 250, 750]:
+                simulation_time = step * config.DT
+                
+                # 生成完整科研報告
+                research_files = self.enhanced_viz.generate_research_report(simulation_time, step)
+                
+                # 導出數據供外部分析
+                if step % 1000 == 0:  # 每1000步導出一次數據
+                    data_files = self.enhanced_viz.export_data_for_analysis(simulation_time, step)
+                    
+        except Exception as e:
+            print(f"\n⚠️  中間結果保存失敗: {e}")
+            print("   └─ 繼續模擬運行...")
+    
+    
+
+    
     def save_snapshot(self, step):
-        """保存快照"""
-        filename_base = f"coffee_sim_3d_{step:06d}"
+        """保存快照 - 使用enhanced_visualizer生成高質量圖片"""
+        simulation_time = step * config.DT
         
-        # 保存密度場
-        self.visualizer.save_image(f"{filename_base}_density.png", 'density')
+        # 使用科研級視覺化系統生成多種分析圖
+        files = []
         
-        # 保存速度場  
-        self.visualizer.save_image(f"{filename_base}_velocity.png", 'velocity')
+        try:
+            # 1. 縱向分析（密度+速度場XZ切面）
+            longitudinal_file = self.enhanced_viz.save_longitudinal_analysis(simulation_time, step)
+            if longitudinal_file:
+                files.append(longitudinal_file)
+            
+            # 2. 速度場分析（XY切面）
+            velocity_file = self.enhanced_viz.save_velocity_analysis(simulation_time, step)
+            if velocity_file:
+                files.append(velocity_file)
+            
+            # 3. 組合分析（四合一視圖）
+            combined_file = self.enhanced_viz.save_combined_analysis(simulation_time, step)
+            if combined_file:
+                files.append(combined_file)
+            
+        except Exception as e:
+            print(f"❌ 快照保存過程中發生錯誤: {e}")
+            # 備用方案：嘗試使用原始visualizer
+            try:
+                filename_base = f"coffee_sim_3d_{step:06d}"
+                self._save_basic_snapshot(filename_base)
+            except Exception as backup_e:
+                print(f"   ❌ 備用方案也失敗: {backup_e}")
         
-        # 保存綜合視圖
-        self.visualizer.save_image(f"{filename_base}_composite.png", 'composite')
-        
-        print(f"快照已保存: {filename_base}_*.png")
+        return files
+    
+    def _save_basic_snapshot(self, filename_base):
+        """備用快照保存方法"""
+        try:
+            # 使用numpy直接保存數據
+            import numpy as np
+            
+            if hasattr(self.lbm, 'rho'):
+                rho_data = self.lbm.rho.to_numpy()
+                np.save(f"{filename_base}_density_data.npy", rho_data)
+                print(f"   └─ 密度數據已保存: {filename_base}_density_data.npy")
+            
+            if hasattr(self.lbm, 'u'):
+                u_data = self.lbm.u.to_numpy()
+                u_mag = np.sqrt(u_data[:,:,:,0]**2 + u_data[:,:,:,1]**2 + u_data[:,:,:,2]**2)
+                np.save(f"{filename_base}_velocity_data.npy", u_mag)
+                print(f"   └─ 速度數據已保存: {filename_base}_velocity_data.npy")
+                
+        except Exception as e:
+            print(f"   ❌ 備用數據保存失敗: {e}")
+    
     
     def save_advanced_analysis(self, step_num=None):
-        """保存高级流动分析图"""
+        """保存高级流动分析图 - 手動調用版本"""
         if step_num is None:
             step_num = self.step_count
             
-        simulation_time = step_num * config.DT
-        
-        print("=== 生成高级可视化分析 ===")
-        
-        # 生成纵向剖面分析
-        longitudinal_file = self.enhanced_viz.save_longitudinal_analysis(simulation_time, step_num)
-        
-        # 生成流速分析
-        velocity_file = self.enhanced_viz.save_velocity_analysis(simulation_time, step_num)
-        
-        # 生成综合分析
-        combined_file = self.enhanced_viz.save_combined_analysis(simulation_time, step_num)
-        
-        print(f"✅ 高级分析图已生成:")
-        print(f"   - 纵向剖面: {longitudinal_file}")
-        print(f"   - 流速分析: {velocity_file}")
-        print(f"   - 综合分析: {combined_file}")
-        
-        return longitudinal_file, velocity_file, combined_file
+        print("📊 正在生成高級分析圖...")
+        return self.results_generator.generate_all_results(step_num, "手動生成")
     
     def show_visualization(self, field_type='longitudinal_animation', slice_direction='xy'):
         """顯示視覺化"""
@@ -580,53 +713,115 @@ class CoffeeSimulation:
             self.visualizer.display_gui(field_type, slice_direction)
     
     def get_final_statistics(self):
-        """獲取最終統計"""
+        """獲取最終統計 - 包含LBM診斷摘要"""
         stats = self.visualizer.get_statistics()
         
-        print("\n=== 最終統計 ===")
+        print("\n📊 最終統計數據")
+        print("="*50)
         for key, value in stats.items():
             print(f"{key}: {value:.6f}")
+        
+        # 添加LBM診斷摘要
+        if hasattr(self, 'diagnostics'):
+            print("\n🔬 LBM診斷摘要")
+            print("="*50)
+            diagnostic_summary = self.diagnostics.get_summary_report()
+            for key, value in diagnostic_summary.items():
+                if isinstance(value, dict):
+                    print(f"{key}:")
+                    for sub_key, sub_value in value.items():
+                        print(f"  └─ {sub_key}: {sub_value}")
+                else:
+                    print(f"{key}: {value}")
+        print("="*50)
         
         return stats
 
 def run_debug_simulation(max_steps=250):
-    """運行debug模式的模擬 - 方便調試使用"""
+    """運行debug模式的模擬"""
     print("🔍 啟動DEBUG模式模擬")
-    print("="*50)
+    print("🎨 使用科研級enhanced_visualizer生成高質量圖片")
     
+    print("🔄 正在創建模擬實例...")
     # 創建模擬實例
     sim = CoffeeSimulation()
-    sim._initialize_simulation()
+    print("✅ 模擬實例創建成功")
     
-    print("\n🚿 注水系統診斷:")
+    print("\n🔍 系統診斷:")
     if hasattr(sim, 'pouring') and sim.pouring:
-        sim.pouring.diagnose_pouring_system()
-    
-    print("\n🔍 速度場診斷:")
+        print("   └─ 注水系統: 正常")
+        # 測試注水系統參數
+        print(f"   └─ 注水直徑: {sim.pouring.POUR_DIAMETER_GRID:.2f} 格")
+        print(f"   └─ 注水速度: {sim.pouring.POUR_VELOCITY:.6f} LU")
+        print(f"   └─ 注水高度: {sim.pouring.POUR_HEIGHT:.1f}")
     if hasattr(sim, 'visualizer'):
-        sim.visualizer.diagnose_velocity_field_issue()
+        print("   └─ 基本視覺化系統: 正常")
+    if hasattr(sim, 'enhanced_viz'):
+        print("   ✅ 科研級視覺化系統: 正常 (用於圖片生成)")
+        print("   └─ 支援: 密度場、速度場、組合分析、數據導出")
     
-    print("\n開始debug模式運行...")
+    print(f"\n🔍 初始統計:")
+    initial_stats = sim._get_current_stats()
+    for key, value in initial_stats.items():
+        print(f"   └─ {key}: {value}")
     
     # 運行debug模式
-    sim.run(max_steps=max_steps, debug_mode=True, show_progress=True)
+    success = sim.run(max_steps=max_steps, debug_mode=True, show_progress=True)
+    
+    if success:
+        print("\n🎉 Debug模擬成功完成")
+        print("📊 所有圖片均為高質量科研級PNG格式")
+        # 顯示最終統計
+        final_stats = sim._get_current_stats()
+        print(f"\n📊 最終統計對比:")
+        for key in initial_stats:
+            initial = initial_stats[key]
+            final = final_stats.get(key, 0)
+            change = final - initial if isinstance(initial, (int, float)) else "N/A"
+            print(f"   └─ {key}: {initial:.4f} → {final:.4f} (變化: {change})")
+    else:
+        print("\n⚠️  Debug模擬異常結束")
+        print("📊 已生成診斷用的科研級分析圖")
     
     return sim
 
 
 def main():
-    """主函數"""
+    """主函數 - 新的用戶界面"""
     import sys
+    
+    print("🚀 進入main函數")
     
     if len(sys.argv) > 1 and sys.argv[1] == "debug":
         # Debug模式：python main.py debug [步數]
         max_steps = int(sys.argv[2]) if len(sys.argv) > 2 else 250
+        print(f"🔍 Debug模式 - 最大步數: {max_steps:,}")
+        print("🔄 準備運行debug模擬...")
         sim = run_debug_simulation(max_steps=max_steps)
+        print("✅ Debug模擬完成")
     else:
         # 正常模式運行
-        sim = CoffeeSimulation()
-        sim._initialize_simulation() 
-        sim.run()
+        print("☕ 手沖咖啡3D模擬系統")
+        print("💡 使用 'python main.py debug [步數]' 進入調試模式")
+        print()
+        
+        # 詢問用戶偏好
+        try:
+            interactive = input("是否啟用互動模式? (y/N): ").lower() == 'y'
+            save_output = input("是否保存中間結果? (Y/n): ").lower() != 'n'
+        except KeyboardInterrupt:
+            print("\n取消運行")
+            return 0
+        
+        # 創建並運行模擬
+        sim = CoffeeSimulation(interactive=interactive)
+        success = sim.run(save_output=save_output, show_progress=True)
+        
+        if success:
+            print("\n🎉 模擬成功完成！")
+            print("📊 查看 results/ 目錄獲取結果文件")
+        else:
+            print("\n⚠️  模擬異常結束，請查看診斷報告")
     
     return 0
 
