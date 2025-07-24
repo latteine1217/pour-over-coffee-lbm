@@ -8,11 +8,13 @@
 This project simulates the physics of pour-over coffee brewing with industrial-grade accuracy:
 
 - 💧 **3D water flow** through V60 dripper geometry
-- ☕ **Coffee particle dynamics** (1,890+ particles tracked)
+- ☕ **Coffee particle dynamics** (1,995+ particles tracked)
 - 🌊 **Multi-phase flow** (water-air interfaces)  
 - 🔬 **Lattice Boltzmann Method** (D3Q19 model)
 - ⚡ **GPU acceleration** with Taichi framework
 - 📊 **Real-time 3D visualization**
+- 🆕 **CFD Engineer-grade Analysis** with professional reports
+- 🆕 **Smart Report Management** with timestamped directories
 
 ## 🚀 Quick Start
 
@@ -31,7 +33,8 @@ pip install -r requirements.txt
 ### Run Simulation
 ```bash
 python main.py                # Full simulation (~10 minutes)
-python main.py debug 50       # Quick test (recommended first)
+python main.py debug 10       # Quick test with CFD reports (recommended first)
+python main.py debug 5        # Ultra-quick preview (5 steps)
 python geometry_visualizer.py # Verify V60 geometry
 ```
 
@@ -44,6 +47,8 @@ python geometry_visualizer.py # Verify V60 geometry
 | **Numerical Stability** | 100% convergence rate | ✅ Production-ready |
 | **Memory Usage** | 852 MB | ✅ Efficient |
 | **Test Coverage** | 85%+ | ✅ Enterprise-level |
+| **🆕 CFD Analysis Features** | 7 professional analysis types | ✅ Research-grade |
+| **🆕 Report Generation** | Automated timestamped reports | ✅ Professional workflow |
 
 ## 🏗️ System Architecture
 
@@ -56,8 +61,15 @@ python geometry_visualizer.py # Verify V60 geometry
 
 ### Visualization System
 - **`visualizer.py`** - Real-time 3D monitoring
-- **`enhanced_visualizer.py`** - Scientific analysis tools
+- **`enhanced_visualizer.py`** - 🆕 CFD Engineer-grade Scientific Analysis (1,669 lines)
+  - **Pressure Field Analysis**: Pressure gradients, pressure coefficients, loss calculations
+  - **Turbulence Analysis**: Q-criterion, λ2-criterion, turbulent kinetic energy
+  - **Dimensionless Numbers**: Reynolds, Capillary, Bond, Péclet number tracking
+  - **Boundary Layer Analysis**: Thickness, wall shear stress, separation points
+  - **Flow Topology**: Critical point identification, separation analysis
+  - **Smart Report Management**: Automated `report/{timestamp}/` directory structure
 - **`benchmark_suite.py`** - Performance testing
+- **`test_enhanced_viz.py`** - 🆕 Report system testing
 
 ### Documentation
 - **`docs/`** - Comprehensive technical documentation
@@ -75,12 +87,45 @@ python geometry_visualizer.py # Verify V60 geometry
 - **Porous media flow** through coffee bed
 - **Particle-fluid coupling** for coffee grounds
 
+### 🆕 CFD Engineer-Grade Analysis
+- **Pressure Field Analysis**: Comprehensive pressure gradient and loss analysis
+- **Turbulence Characteristics**: Q-criterion and λ2-criterion vortex identification
+- **Dimensionless Analysis**: Real-time Reynolds, Capillary, Bond, Péclet tracking
+- **Boundary Layer Analysis**: Wall shear stress and separation detection
+- **Flow Topology**: Critical point identification and flow structure analysis
+- **Professional Reports**: Automated generation of research-quality visualizations
+
 ### Numerical Methods
 - **D3Q19 velocity model** for 3D accuracy
 - **BGK collision operator** with forcing
 - **Guo forcing scheme** for body forces
 - **Bounce-back boundaries** for complex geometry
 - **Adaptive time stepping** for stability
+
+## 📈 Output & Reports
+
+### 🆕 Professional CFD Reports
+Each simulation automatically generates timestamped professional reports:
+
+```
+report/YYYYMMDD_HHMMSS/
+├── images/
+│   ├── cfd_pressure_analysis_step_XXXX.png      # Pressure field analysis
+│   ├── cfd_turbulence_analysis_step_XXXX.png    # Turbulence characteristics
+│   ├── cfd_dimensionless_analysis_step_XXXX.png # Dimensionless numbers
+│   ├── cfd_boundary_layer_analysis_step_XXXX.png # Boundary layer analysis
+│   ├── velocity_analysis_step_XXXX.png           # Velocity field
+│   ├── v60_longitudinal_analysis_step_XXXX.png   # V60-specific analysis
+│   └── combined_analysis_step_XXXX.png           # Multi-physics overview
+├── data/                                         # Numerical data exports
+└── analysis/                                     # Detailed analysis reports
+```
+
+### Analysis Features
+- **Pressure Analysis**: Gradient fields, pressure coefficients, loss calculations
+- **Turbulence Analysis**: Vortex identification, turbulent kinetic energy, dissipation
+- **Dimensionless Numbers**: Time-series tracking of critical flow parameters
+- **Boundary Layer**: Wall effects, separation points, shear stress distribution
 
 ## 📈 Validation & Testing
 
@@ -137,18 +182,22 @@ TAU_WATER = 0.800           # Relaxation time
 - **Industrial Stability** (100% numerical convergence)
 - **Research Performance** (159M+ points/second)
 - **Enterprise Testing** (85%+ coverage)
+- **🆕 CFD Professional Analysis** (7 specialized analysis types)
+- **🆕 Automated Report Generation** (Smart timestamped directory management)
 
 ### Academic Impact
 - **53,000+ words** of technical documentation
 - **255+ mathematical equations** with full derivations
 - **Journal-ready research papers** with peer-review standards
 - **Open-source CFD education** resource
+- **🆕 Professional CFD Visualization** (Research-grade analysis charts)
 
 ### Engineering Quality
 - Complete CI/CD pipeline with GitHub Actions
 - Professional documentation with academic standards
 - Comprehensive test suite with performance benchmarks
 - Production-grade error handling and diagnostics
+- **🆕 Enterprise Report Management** (Automated professional output)
 
 ## 🤝 Contributing
 

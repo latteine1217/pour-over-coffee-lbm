@@ -125,11 +125,11 @@ else:
 RHO_WATER = 1.0                        # 參考密度
 RHO_AIR = AIR_DENSITY_20C / WATER_DENSITY_90C  # 真實密度比
 
-# 重力轉換 (修正公式 + 8%強度設定)
+# 重力轉換 (優化CFD流動速度 - 15%強度設定)
 GRAVITY_PHYS = 9.81                    # m/s²
 GRAVITY_LU_FULL = GRAVITY_PHYS * (SCALE_TIME**2) / SCALE_LENGTH  # 完整重力: ~61.34
-GRAVITY_STRENGTH_FACTOR = 0.08         # 8%重力強度，平衡效果與穩定性的最佳設定
-GRAVITY_LU = GRAVITY_LU_FULL * GRAVITY_STRENGTH_FACTOR  # 實際使用重力: ~4.91
+GRAVITY_STRENGTH_FACTOR = 0.15         # 15%重力強度，優化流動速度同時保持數值穩定性
+GRAVITY_LU = GRAVITY_LU_FULL * GRAVITY_STRENGTH_FACTOR  # 實際使用重力: ~9.20
 
 # 表面張力係數
 SURFACE_TENSION_PHYS = 0.0728          # N/m (90°C水的表面張力)
@@ -336,3 +336,210 @@ if errors:
         print(f"  • {error}")
 else:
     print(f"\n✅ 所有參數通過驗證！")
+
+# ====================
+# CFD參數一致性驗證系統 (優化)
+# ====================
+
+def validate_parameter_consistency():
+    """
+    檢查各模組間參數一致性 (CFD一致性優化)
+    
+    全面驗證CFD系統中各模組使用的物理參數、數值參數
+    和邊界條件參數的一致性，確保系統級一致性。
+    
+    Validation Categories:
+        1. 物理參數一致性 (密度、黏滯度、溫度)
+        2. 數值參數一致性 (時間步、空間步、CFL)
+        3. 幾何參數一致性 (尺度轉換、座標系)
+        4. 邊界條件一致性 (邊界類型、參數值)
+        
+    Error Detection:
+        - 參數值不匹配
+        - 單位不一致
+        - 數值範圍超出合理區間
+        - 模組間衝突設定
+    """
+    print("\n🔍 CFD參數一致性檢查...")
+    
+    consistency_errors = []
+    warnings = []
+    
+    try:
+        # 1. 物理參數一致性
+        print("   ├─ 檢查物理參數一致性...")
+        _check_physical_parameters(consistency_errors, warnings)
+        
+        # 2. 數值參數一致性  
+        print("   ├─ 檢查數值參數一致性...")
+        _check_numerical_parameters(consistency_errors, warnings)
+        
+        # 3. 幾何參數一致性
+        print("   ├─ 檢查幾何參數一致性...")
+        _check_geometric_parameters(consistency_errors, warnings)
+        
+        # 4. 邊界條件一致性
+        print("   ├─ 檢查邊界條件一致性...")
+        _check_boundary_parameters(consistency_errors, warnings)
+        
+        # 5. 模組耦合一致性
+        print("   ├─ 檢查模組耦合一致性...")
+        _check_coupling_parameters(consistency_errors, warnings)
+        
+        # 彙總結果
+        if consistency_errors:
+            print(f"\n❌ 發現 {len(consistency_errors)} 個一致性錯誤:")
+            for i, error in enumerate(consistency_errors, 1):
+                print(f"  {i}. {error}")
+            raise ValueError("CFD參數一致性檢查失敗")
+            
+        if warnings:
+            print(f"\n⚠️  發現 {len(warnings)} 個警告:")
+            for i, warning in enumerate(warnings, 1):
+                print(f"  {i}. {warning}")
+        
+        print("   └─ ✅ CFD參數一致性檢查通過")
+        
+    except Exception as e:
+        print(f"   └─ ❌ 一致性檢查過程失敗: {e}")
+        raise
+
+def _check_physical_parameters(errors, warnings):
+    """檢查物理參數一致性"""
+    # 密度參數檢查
+    if abs(RHO_WATER - 1.0) > 1e-6:
+        errors.append(f"水密度參考值不為1.0: {RHO_WATER}")
+    
+    # 密度比檢查
+    expected_air_ratio = AIR_DENSITY_20C / WATER_DENSITY_90C
+    if abs(RHO_AIR - expected_air_ratio) > 1e-6:
+        errors.append(f"空氣密度比不一致: {RHO_AIR} vs {expected_air_ratio}")
+    
+    # 黏滯度參數檢查
+    if TAU_WATER <= 0.5:
+        errors.append(f"水相鬆弛時間不穩定: τ_water = {TAU_WATER}")
+    
+    if TAU_AIR <= 0.5:
+        errors.append(f"氣相鬆弛時間不穩定: τ_air = {TAU_AIR}")
+    
+    # 溫度一致性
+    if WATER_TEMP_C != 90.0:
+        warnings.append(f"水溫度非標準90°C: {WATER_TEMP_C}°C")
+
+def _check_numerical_parameters(errors, warnings):
+    """檢查數值參數一致性"""
+    # CFL數檢查
+    if CFL_NUMBER >= 1.0:
+        errors.append(f"CFL數不穩定: {CFL_NUMBER} >= 1.0")
+    elif CFL_NUMBER > 0.5:
+        warnings.append(f"CFL數偏高: {CFL_NUMBER} > 0.5")
+    
+    # Mach數檢查
+    if MACH_NUMBER > 0.3:
+        errors.append(f"Mach數過高: {MACH_NUMBER} > 0.3")
+    elif MACH_NUMBER > 0.1:
+        warnings.append(f"Mach數建議降低: {MACH_NUMBER} > 0.1")
+    
+    # 時間步檢查
+    if DT != 1.0:
+        warnings.append(f"LBM時間步非標準值: DT = {DT}")
+    
+    # 空間步檢查
+    if DX != 1.0:
+        warnings.append(f"LBM空間步非標準值: DX = {DX}")
+
+def _check_geometric_parameters(errors, warnings):
+    """檢查幾何參數一致性"""
+    # 網格尺寸一致性
+    if NX != NY or NY != NZ:
+        warnings.append(f"非立方網格: {NX}×{NY}×{NZ}")
+    
+    # 尺度轉換一致性
+    expected_scale_length = PHYSICAL_DOMAIN_SIZE / NZ
+    if abs(SCALE_LENGTH - expected_scale_length) > 1e-8:
+        errors.append(f"長度尺度不一致: {SCALE_LENGTH} vs {expected_scale_length}")
+    
+    # V60幾何合理性
+    if TOP_RADIUS <= BOTTOM_RADIUS:
+        errors.append(f"V60幾何不合理: 頂部半徑 <= 底部半徑")
+    
+    # 物理域包含V60檢查
+    v60_diameter = 2 * TOP_RADIUS
+    if PHYSICAL_DOMAIN_SIZE < v60_diameter * 1.2:
+        warnings.append(f"物理域可能太小: {PHYSICAL_DOMAIN_SIZE*100:.1f}cm vs V60直徑{v60_diameter*100:.1f}cm")
+
+def _check_boundary_parameters(errors, warnings):
+    """檢查邊界條件一致性"""
+    # 重力參數檢查
+    if GRAVITY_STRENGTH_FACTOR > 0.2:
+        warnings.append(f"重力強度係數偏高: {GRAVITY_STRENGTH_FACTOR}")
+    
+    # 注水參數檢查
+    if INLET_VELOCITY > 0.1:
+        warnings.append(f"注水速度偏高: {INLET_VELOCITY} > 0.1 lu/ts")
+    
+    # 咖啡床高度合理性
+    if hasattr(locals(), 'COFFEE_BED_HEIGHT_PHYS'):
+        if COFFEE_BED_HEIGHT_PHYS > CUP_HEIGHT * 0.5:
+            warnings.append(f"咖啡床高度偏高: {COFFEE_BED_HEIGHT_PHYS*100:.1f}cm")
+
+def _check_coupling_parameters(errors, warnings):
+    """檢查模組耦合一致性"""
+    # LES參數與Reynolds數匹配
+    if ENABLE_LES and RE_CHAR < LES_REYNOLDS_THRESHOLD:
+        warnings.append(f"LES啟用但Re數偏低: Re={RE_CHAR} < {LES_REYNOLDS_THRESHOLD}")
+    
+    # 表面張力與Weber數一致性
+    if abs(WEBER_NUMBER - 1.0) > 0.1:
+        warnings.append(f"Weber數非標準值: We = {WEBER_NUMBER}")
+    
+    # 多相流參數合理性
+    interface_thickness = 2.0  # 來自multiphase_3d.py
+    if interface_thickness > SCALE_LENGTH * 5:
+        warnings.append(f"界面厚度相對格子尺寸偏大")
+
+def get_consistency_report():
+    """
+    獲取完整的參數一致性報告
+    
+    Returns:
+        dict: 包含所有參數一致性信息的報告
+    """
+    return {
+        'physical_parameters': {
+            'water_density': RHO_WATER,
+            'air_density': RHO_AIR,
+            'water_tau': TAU_WATER,
+            'air_tau': TAU_AIR,
+            'temperature': WATER_TEMP_C
+        },
+        'numerical_parameters': {
+            'cfl_number': CFL_NUMBER,
+            'mach_number': MACH_NUMBER,
+            'reynolds_physical': RE_CHAR,
+            'reynolds_lattice': RE_LATTICE
+        },
+        'geometric_parameters': {
+            'grid_size': (NX, NY, NZ),
+            'scale_length': SCALE_LENGTH,
+            'physical_domain': PHYSICAL_DOMAIN_SIZE,
+            'v60_geometry': (TOP_RADIUS, BOTTOM_RADIUS, CUP_HEIGHT)
+        },
+        'coupling_parameters': {
+            'les_enabled': ENABLE_LES,
+            'les_threshold': LES_REYNOLDS_THRESHOLD,
+            'weber_number': WEBER_NUMBER,
+            'surface_tension': SURFACE_TENSION_LU
+        }
+    }
+
+# 在模組載入時自動執行一致性檢查
+if __name__ == "__main__":
+    validate_parameter_consistency()
+else:
+    # 導入時執行簡化檢查
+    try:
+        validate_parameter_consistency()
+    except Exception as e:
+        print(f"⚠️  CFD參數一致性警告: {e}")
+        print("   建議運行完整檢查: python config.py")

@@ -99,6 +99,7 @@ temp/
 *_backup.py
 *_temp.py
 config_backup_*.py
+.backup_archive/
 
 # ===== Testing and Coverage =====
 .pytest_cache/

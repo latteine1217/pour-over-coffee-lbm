@@ -4,16 +4,22 @@
 提供多物理場分析、量化統計、時間序列追蹤等功能
 """
 
+# 標準庫導入
+import json
+import os
+import time
+from datetime import datetime
+
+# 第三方庫導入
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
-from matplotlib.colors import LinearSegmentedColormap
 import matplotlib.gridspec as gridspec
+from matplotlib.colors import LinearSegmentedColormap
 from scipy import ndimage
 from scipy.stats import pearsonr
-import json
-import time
-from datetime import datetime
+
+# 本地模組導入
 import config
 
 class EnhancedVisualizer:
@@ -36,6 +42,11 @@ class EnhancedVisualizer:
         self.filter = filter_system
         self.simulation = simulation  # 新增：用於訪問診斷數據
         
+        # 輸出目錄管理
+        self.report_dir = None
+        self.session_timestamp = None
+        self._setup_output_directory()
+        
         # 科研分析參數
         self.analysis_data = {
             'timestamps': [],
@@ -54,9 +65,28 @@ class EnhancedVisualizer:
         self.define_analysis_regions()
         
         print("🔬 科研級增強視覺化系統已初始化")
+        print(f"   └─ 報告目錄: {self.report_dir}")
         print(f"   └─ 多物理場分析: {'✅' if multiphase else '❌'}")
         print(f"   └─ 顆粒追蹤: {'✅' if particle_system else '❌'}")
         print(f"   └─ 濾紙分析: {'✅' if filter_system else '❌'}")
+    
+    def _setup_output_directory(self):
+        """設置輸出目錄結構"""
+        # 創建時間戳
+        self.session_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        
+        # 創建報告目錄
+        self.report_dir = f"report/{self.session_timestamp}"
+        os.makedirs(self.report_dir, exist_ok=True)
+        
+        # 創建子目錄
+        subdirs = ['images', 'data', 'analysis']
+        for subdir in subdirs:
+            os.makedirs(f"{self.report_dir}/{subdir}", exist_ok=True)
+    
+    def get_output_path(self, filename, subdir='images'):
+        """獲取輸出路徑"""
+        return f"{self.report_dir}/{subdir}/{filename}"
     
     def setup_colormaps(self):
         """設置專業科研配色"""
@@ -117,7 +147,7 @@ class EnhancedVisualizer:
         }
     
     def calculate_flow_characteristics(self):
-        """計算流體力學特徵參數 (科研級修正版)"""
+        """計算流體力學特徵參數 (CFD工程師專業版)"""
         if not hasattr(self.lbm, 'u') or not hasattr(self.lbm, 'rho'):
             return {}
         
@@ -138,6 +168,25 @@ class EnhancedVisualizer:
             reynolds = (characteristic_velocity * characteristic_length) / kinematic_viscosity
         else:
             reynolds = 0.0
+        
+        # ===== CFD工程師專業分析 =====
+        
+        # 1. 擴展無量綱數分析
+        dimensionless_numbers = self._calculate_extended_dimensionless_numbers(
+            u_mag_physical, characteristic_velocity, characteristic_length, kinematic_viscosity
+        )
+        
+        # 2. 壓力場專業分析
+        pressure_analysis = self._calculate_pressure_field_analysis(rho_data, u_data)
+        
+        # 3. 湍流特徵分析
+        turbulence_analysis = self._calculate_turbulence_characteristics(u_data)
+        
+        # 4. 邊界層分析
+        boundary_layer_analysis = self._calculate_boundary_layer_properties(u_data)
+        
+        # 5. 流動拓撲分析
+        flow_topology = self._calculate_flow_topology(u_data)
         
         # 壓力場分析 (轉換為物理單位)
         pressure_lu = rho_data * config.CS2  # 格子單位壓力
@@ -163,6 +212,7 @@ class EnhancedVisualizer:
         froude_number = characteristic_velocity / np.sqrt(config.GRAVITY_PHYS * characteristic_length)
         
         return {
+            # 基本參數
             'reynolds_number': reynolds,
             'weber_number': weber_number,
             'froude_number': froude_number,
@@ -178,8 +228,375 @@ class EnhancedVisualizer:
                 'velocity': characteristic_velocity,
                 'time': characteristic_length / characteristic_velocity if characteristic_velocity > 0 else 0,
                 'viscosity': kinematic_viscosity
-            }
+            },
+            # ===== CFD工程師專業參數 =====
+            'dimensionless_numbers': dimensionless_numbers,
+            'pressure_analysis': pressure_analysis,
+            'turbulence_analysis': turbulence_analysis,
+            'boundary_layer_analysis': boundary_layer_analysis,
+            'flow_topology': flow_topology
         }
+    
+    def _calculate_extended_dimensionless_numbers(self, u_mag_physical, u_char, l_char, nu):
+        """計算擴展無量綱數"""
+        try:
+            # Capillary數 (表面張力效應)
+            if hasattr(config, 'SURFACE_TENSION_PHYS') and config.SURFACE_TENSION_PHYS > 0:
+                mu_phys = config.RHO_WATER * nu  # 動力黏滯度
+                capillary_number = (mu_phys * u_char) / config.SURFACE_TENSION_PHYS
+            else:
+                capillary_number = 0.0
+            
+            # Bond數 (重力vs表面張力)
+            if hasattr(config, 'SURFACE_TENSION_PHYS') and config.SURFACE_TENSION_PHYS > 0:
+                bond_number = (config.RHO_WATER * config.GRAVITY_PHYS * l_char**2) / config.SURFACE_TENSION_PHYS
+            else:
+                bond_number = 0.0
+            
+            # Péclet數 (對流vs擴散)
+            if hasattr(config, 'DIFFUSIVITY') and config.DIFFUSIVITY > 0:
+                peclet_number = (u_char * l_char) / config.DIFFUSIVITY
+            else:
+                peclet_number = 0.0
+            
+            # 局部Reynolds數分佈
+            local_reynolds = (u_mag_physical * l_char) / nu
+            
+            return {
+                'capillary_number': capillary_number,
+                'bond_number': bond_number,
+                'peclet_number': peclet_number,
+                'local_reynolds_max': np.max(local_reynolds),
+                'local_reynolds_mean': np.mean(local_reynolds[local_reynolds > 0]),
+                'local_reynolds_std': np.std(local_reynolds),
+                'local_reynolds_field': local_reynolds
+            }
+        except Exception as e:
+            print(f"Warning: Extended dimensionless numbers calculation failed: {e}")
+            return {}
+    
+    def _calculate_pressure_field_analysis(self, rho_data, u_data):
+        """專業壓力場分析"""
+        try:
+            # 壓力場轉換為物理單位
+            pressure_lu = rho_data * config.CS2
+            pressure_physical = pressure_lu * config.SCALE_DENSITY * config.SCALE_VELOCITY**2  # Pa
+            
+            # 壓力梯度計算
+            grad_p_x, grad_p_y, grad_p_z = np.gradient(pressure_physical)
+            grad_p_magnitude = np.sqrt(grad_p_x**2 + grad_p_y**2 + grad_p_z**2)
+            
+            # 壓力係數 (Cp)
+            u_mag = np.sqrt(u_data[:,:,:,0]**2 + u_data[:,:,:,1]**2 + u_data[:,:,:,2]**2)
+            u_max = np.max(u_mag)
+            if u_max > 0:
+                dynamic_pressure = 0.5 * config.RHO_WATER * (u_max * config.SCALE_VELOCITY)**2
+                pressure_coefficient = (pressure_physical - np.mean(pressure_physical)) / dynamic_pressure
+            else:
+                pressure_coefficient = np.zeros_like(pressure_physical)
+            
+            # 沿程壓力損失
+            pressure_profile = self._calculate_streamwise_pressure_profile(pressure_physical)
+            
+            return {
+                'pressure_gradient_magnitude': grad_p_magnitude,
+                'pressure_gradient_components': [grad_p_x, grad_p_y, grad_p_z],
+                'pressure_coefficient': pressure_coefficient,
+                'max_pressure_gradient': np.max(grad_p_magnitude),
+                'pressure_drop_total': np.max(pressure_physical) - np.min(pressure_physical),
+                'pressure_profile': pressure_profile
+            }
+        except Exception as e:
+            print(f"Warning: Pressure field analysis failed: {e}")
+            return {}
+    
+    def _calculate_turbulence_characteristics(self, u_data):
+        """湍流特徵分析"""
+        try:
+            # Q-criterion (渦流識別)
+            q_criterion = self._calculate_q_criterion(u_data)
+            
+            # λ2-criterion (另一種渦流識別方法)
+            lambda2_criterion = self._calculate_lambda2_criterion(u_data)
+            
+            # 湍流強度
+            turbulence_intensity = self._calculate_turbulence_intensity(u_data)
+            
+            # 湍流耗散率估算
+            dissipation_rate = self._estimate_dissipation_rate(u_data)
+            
+            return {
+                'q_criterion': q_criterion,
+                'lambda2_criterion': lambda2_criterion,
+                'turbulence_intensity': turbulence_intensity,
+                'dissipation_rate': dissipation_rate,
+                'turbulent_kinetic_energy': np.mean(turbulence_intensity**2) * 1.5
+            }
+        except Exception as e:
+            print(f"Warning: Turbulence analysis failed: {e}")
+            return {}
+    
+    def _calculate_boundary_layer_properties(self, u_data):
+        """邊界層特性分析"""
+        try:
+            # 近壁速度梯度
+            wall_shear_stress = self._calculate_wall_shear_stress(u_data)
+            
+            # 邊界層厚度估算
+            boundary_layer_thickness = self._estimate_boundary_layer_thickness(u_data)
+            
+            # 位移厚度和動量厚度
+            displacement_thickness, momentum_thickness = self._calculate_boundary_layer_thicknesses(u_data)
+            
+            return {
+                'wall_shear_stress': wall_shear_stress,
+                'boundary_layer_thickness': boundary_layer_thickness,
+                'displacement_thickness': displacement_thickness,
+                'momentum_thickness': momentum_thickness,
+                'shape_factor': displacement_thickness / momentum_thickness if momentum_thickness > 0 else 0
+            }
+        except Exception as e:
+            print(f"Warning: Boundary layer analysis failed: {e}")
+            return {}
+    
+    def _calculate_flow_topology(self, u_data):
+        """流動拓撲分析"""
+        try:
+            # 流線曲率
+            streamline_curvature = self._calculate_streamline_curvature(u_data)
+            
+            # 流動分離點識別
+            separation_points = self._identify_separation_points(u_data)
+            
+            # 駐點和鞍點識別
+            critical_points = self._identify_critical_points(u_data)
+            
+            return {
+                'streamline_curvature': streamline_curvature,
+                'separation_points': separation_points,
+                'critical_points': critical_points
+            }
+        except Exception as e:
+            print(f"Warning: Flow topology analysis failed: {e}")
+            return {}
+    
+    # ===== 輔助計算方法 =====
+    
+    def _calculate_q_criterion(self, u_data):
+        """計算Q-criterion (渦流識別)"""
+        try:
+            # 速度梯度張量
+            dudx = np.gradient(u_data[:,:,:,0], axis=0)
+            dudy = np.gradient(u_data[:,:,:,0], axis=1)
+            dudz = np.gradient(u_data[:,:,:,0], axis=2)
+            dvdx = np.gradient(u_data[:,:,:,1], axis=0)
+            dvdy = np.gradient(u_data[:,:,:,1], axis=1)
+            dvdz = np.gradient(u_data[:,:,:,1], axis=2)
+            dwdx = np.gradient(u_data[:,:,:,2], axis=0)
+            dwdy = np.gradient(u_data[:,:,:,2], axis=1)
+            dwdz = np.gradient(u_data[:,:,:,2], axis=2)
+            
+            # 應變率張量 S 和渦度張量 Ω
+            S11, S22, S33 = dudx, dvdy, dwdz
+            S12 = 0.5 * (dudy + dvdx)
+            S13 = 0.5 * (dudz + dwdx)
+            S23 = 0.5 * (dvdz + dwdy)
+            
+            O12 = 0.5 * (dudy - dvdx)
+            O13 = 0.5 * (dudz - dwdx)
+            O23 = 0.5 * (dvdz - dwdy)
+            
+            # Q = 0.5 * (|Ω|² - |S|²)
+            S_magnitude_sq = S11**2 + S22**2 + S33**2 + 2*(S12**2 + S13**2 + S23**2)
+            O_magnitude_sq = 2*(O12**2 + O13**2 + O23**2)
+            
+            Q = 0.5 * (O_magnitude_sq - S_magnitude_sq)
+            
+            return Q
+        except Exception as e:
+            print(f"Warning: Q-criterion calculation failed: {e}")
+            return np.zeros_like(u_data[:,:,:,0])
+    
+    def _calculate_lambda2_criterion(self, u_data):
+        """計算λ2-criterion"""
+        try:
+            # 簡化版：使用渦度大小作為近似
+            omega_x = np.gradient(u_data[:,:,:,2], axis=1) - np.gradient(u_data[:,:,:,1], axis=2)
+            omega_y = np.gradient(u_data[:,:,:,0], axis=2) - np.gradient(u_data[:,:,:,2], axis=0)
+            omega_z = np.gradient(u_data[:,:,:,1], axis=0) - np.gradient(u_data[:,:,:,0], axis=1)
+            
+            lambda2 = -(omega_x**2 + omega_y**2 + omega_z**2)
+            
+            return lambda2
+        except Exception as e:
+            print(f"Warning: λ2-criterion calculation failed: {e}")
+            return np.zeros_like(u_data[:,:,:,0])
+    
+    def _calculate_turbulence_intensity(self, u_data):
+        """計算湍流強度"""
+        try:
+            u_mag = np.sqrt(u_data[:,:,:,0]**2 + u_data[:,:,:,1]**2 + u_data[:,:,:,2]**2)
+            u_mean = np.mean(u_mag)
+            
+            # 簡化：使用速度波動近似湍流強度
+            turbulence_intensity = np.abs(u_mag - u_mean) / (u_mean + 1e-10)
+            
+            return turbulence_intensity
+        except Exception as e:
+            print(f"Warning: Turbulence intensity calculation failed: {e}")
+            return np.zeros_like(u_data[:,:,:,0])
+    
+    def _estimate_dissipation_rate(self, u_data):
+        """估算湍流耗散率"""
+        try:
+            # 簡化：使用速度梯度估算
+            dudx = np.gradient(u_data[:,:,:,0], axis=0)
+            dudy = np.gradient(u_data[:,:,:,0], axis=1)
+            dudz = np.gradient(u_data[:,:,:,0], axis=2)
+            
+            dissipation = config.NU_CHAR * (dudx**2 + dudy**2 + dudz**2)
+            
+            return dissipation
+        except Exception as e:
+            print(f"Warning: Dissipation rate calculation failed: {e}")
+            return np.zeros_like(u_data[:,:,:,0])
+    
+    def _calculate_wall_shear_stress(self, u_data):
+        """計算壁面剪應力"""
+        try:
+            # 在V60壁面附近計算剪應力
+            center_x, center_y = config.NX//2, config.NY//2
+            radius = config.TOP_RADIUS / config.SCALE_LENGTH
+            
+            # 簡化：在半徑處計算速度梯度
+            wall_shear = np.zeros_like(u_data[:,:,:,0])
+            
+            for i in range(config.NX):
+                for j in range(config.NY):
+                    for k in range(config.NZ):
+                        dist_from_center = np.sqrt((i-center_x)**2 + (j-center_y)**2)
+                        if abs(dist_from_center - radius) < 2:  # 近壁區域
+                            # 計算法向速度梯度
+                            if i > 0 and i < config.NX-1:
+                                wall_shear[i,j,k] = config.NU_CHAR * (u_data[i+1,j,k,0] - u_data[i-1,j,k,0]) / 2
+            
+            return wall_shear
+        except Exception as e:
+            print(f"Warning: Wall shear stress calculation failed: {e}")
+            return np.zeros_like(u_data[:,:,:,0])
+    
+    def _estimate_boundary_layer_thickness(self, u_data):
+        """估算邊界層厚度"""
+        try:
+            # 簡化：使用99%自由流速度定義
+            u_mag = np.sqrt(u_data[:,:,:,0]**2 + u_data[:,:,:,1]**2 + u_data[:,:,:,2]**2)
+            u_max = np.max(u_mag)
+            
+            # 邊界層厚度定義為速度達到99%自由流的距離
+            boundary_layer_thickness = np.zeros((config.NX, config.NY))
+            
+            for i in range(config.NX):
+                for j in range(config.NY):
+                    velocity_profile = u_mag[i, j, :]
+                    threshold = 0.99 * u_max
+                    
+                    # 找到第一個超過閾值的點
+                    indices = np.where(velocity_profile > threshold)[0]
+                    if len(indices) > 0:
+                        boundary_layer_thickness[i, j] = indices[0]
+            
+            return boundary_layer_thickness
+        except Exception as e:
+            print(f"Warning: Boundary layer thickness calculation failed: {e}")
+            return np.zeros((config.NX, config.NY))
+    
+    def _calculate_boundary_layer_thicknesses(self, u_data):
+        """計算位移厚度和動量厚度"""
+        try:
+            # 簡化實現
+            displacement_thickness = np.mean(self._estimate_boundary_layer_thickness(u_data)) * 0.3
+            momentum_thickness = displacement_thickness * 0.37  # 層流邊界層近似
+            
+            return displacement_thickness, momentum_thickness
+        except Exception as e:
+            print(f"Warning: Boundary layer thicknesses calculation failed: {e}")
+            return 0.0, 0.0
+    
+    def _calculate_streamline_curvature(self, u_data):
+        """計算流線曲率"""
+        try:
+            # 使用速度方向變化率估算曲率
+            u_mag = np.sqrt(u_data[:,:,:,0]**2 + u_data[:,:,:,1]**2 + u_data[:,:,:,2]**2)
+            
+            # 單位速度向量
+            u_unit = u_data / (u_mag[:,:,:,np.newaxis] + 1e-10)
+            
+            # 曲率近似：單位切向量的變化率
+            curvature = np.sqrt(
+                np.gradient(u_unit[:,:,:,0], axis=0)**2 + 
+                np.gradient(u_unit[:,:,:,1], axis=1)**2 + 
+                np.gradient(u_unit[:,:,:,2], axis=2)**2
+            )
+            
+            return curvature
+        except Exception as e:
+            print(f"Warning: Streamline curvature calculation failed: {e}")
+            return np.zeros_like(u_data[:,:,:,0])
+    
+    def _identify_separation_points(self, u_data):
+        """識別流動分離點"""
+        try:
+            # 簡化：尋找壁面剪應力為零的點
+            wall_shear = self._calculate_wall_shear_stress(u_data)
+            
+            # 分離點：剪應力接近零且有負值
+            separation_mask = (np.abs(wall_shear) < 1e-6) & (wall_shear <= 0)
+            separation_points = np.where(separation_mask)
+            
+            return {
+                'count': len(separation_points[0]),
+                'locations': list(zip(separation_points[0], separation_points[1], separation_points[2]))
+            }
+        except Exception as e:
+            print(f"Warning: Separation points identification failed: {e}")
+            return {'count': 0, 'locations': []}
+    
+    def _identify_critical_points(self, u_data):
+        """識別臨界點"""
+        try:
+            # 尋找速度為零的點
+            u_mag = np.sqrt(u_data[:,:,:,0]**2 + u_data[:,:,:,1]**2 + u_data[:,:,:,2]**2)
+            
+            critical_mask = u_mag < 1e-6
+            critical_points = np.where(critical_mask)
+            
+            return {
+                'count': len(critical_points[0]),
+                'locations': list(zip(critical_points[0], critical_points[1], critical_points[2]))
+            }
+        except Exception as e:
+            print(f"Warning: Critical points identification failed: {e}")
+            return {'count': 0, 'locations': []}
+    
+    def _calculate_streamwise_pressure_profile(self, pressure_field):
+        """計算沿程壓力分佈"""
+        try:
+            # 沿Z方向（主流方向）的壓力分佈
+            center_x, center_y = config.NX//2, config.NY//2
+            
+            pressure_profile = []
+            for k in range(config.NZ):
+                avg_pressure = np.mean(pressure_field[
+                    center_x-5:center_x+5, 
+                    center_y-5:center_y+5, 
+                    k
+                ])
+                pressure_profile.append(avg_pressure)
+            
+            return pressure_profile
+        except Exception as e:
+            print(f"Warning: Streamwise pressure profile calculation failed: {e}")
+            return []
     
     def _calculate_regional_flow_rate(self, u_data, region):
         """計算指定區域的流量"""
@@ -276,10 +693,10 @@ class EnhancedVisualizer:
             return {}
     
     def generate_research_report(self, simulation_time, step_num):
-        """生成完整的科研報告"""
+        """生成完整的科研報告 - CFD工程師專業版"""
         # 計算真實物理時間
         physical_time = step_num * config.SCALE_TIME
-        print(f"🔬 生成科研級分析報告 (t={physical_time:.2f}s)...")
+        print(f"🔬 生成CFD工程師級分析報告 (t={physical_time:.2f}s)...")
         
         generated_files = []
         
@@ -298,18 +715,405 @@ class EnhancedVisualizer:
         if longitudinal_file:
             generated_files.append(longitudinal_file)
             
-        # 4. LBM診斷監控 (新增)
+        # 4. LBM診斷監控
         if hasattr(self, 'simulation') and hasattr(self.simulation, 'lbm_diagnostics'):
             lbm_file = self.save_lbm_monitoring_chart(simulation_time, step_num)
             if lbm_file:
                 generated_files.append(lbm_file)
                 print(f"   📊 LBM診斷: {lbm_file}")
         
-        print(f"✅ 科研報告生成完成，共 {len(generated_files)} 個文件:")
+        # ===== CFD工程師專業分析 =====
+        
+        # 5. 壓力場專業分析
+        pressure_file = self.save_pressure_field_analysis(simulation_time, step_num)
+        if pressure_file:
+            generated_files.append(pressure_file)
+            print(f"   📊 壓力場分析: {pressure_file}")
+        
+        # 6. 湍流特徵分析
+        turbulence_file = self.save_turbulence_analysis(simulation_time, step_num)
+        if turbulence_file:
+            generated_files.append(turbulence_file)
+            print(f"   📊 湍流分析: {turbulence_file}")
+        
+        # 7. 無量綱數時序分析
+        dimensionless_file = self.save_dimensionless_analysis(simulation_time, step_num)
+        if dimensionless_file:
+            generated_files.append(dimensionless_file)
+            print(f"   📊 無量綱分析: {dimensionless_file}")
+        
+        # 8. 邊界層分析 (每100步生成一次)
+        if step_num % 100 == 0:
+            boundary_file = self.save_boundary_layer_analysis(simulation_time, step_num)
+            if boundary_file:
+                generated_files.append(boundary_file)
+                print(f"   📊 邊界層分析: {boundary_file}")
+        
+        print(f"✅ CFD工程師級報告生成完成，共 {len(generated_files)} 個文件:")
         for file in generated_files:
             print(f"   📄 {file}")
         
         return generated_files
+    
+    def save_pressure_field_analysis(self, simulation_time, step_num):
+        """保存壓力場專業分析圖"""
+        try:
+            fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(14, 10))
+            
+            # 計算流體特徵
+            flow_chars = self.calculate_flow_characteristics()
+            pressure_analysis = flow_chars.get('pressure_analysis', {})
+            physical_time = step_num * config.SCALE_TIME
+            
+            if hasattr(self.lbm, 'rho') and hasattr(self.lbm, 'u'):
+                rho_data = self.lbm.rho.to_numpy()
+                u_data = self.lbm.u.to_numpy()
+                
+                # 壓力場
+                pressure_lu = rho_data * config.CS2
+                pressure_physical = pressure_lu * config.SCALE_DENSITY * config.SCALE_VELOCITY**2
+                
+                # 1. 壓力場分佈 (XZ切面)
+                pressure_slice = pressure_physical[:, config.NY//2, :]
+                im1 = ax1.imshow(pressure_slice.T, origin='lower', aspect='auto', 
+                               cmap='RdBu_r', vmin=np.percentile(pressure_slice, 5), 
+                               vmax=np.percentile(pressure_slice, 95))
+                ax1.set_title('Pressure Field (Pa)', fontsize=12)
+                ax1.set_xlabel('X Position')
+                ax1.set_ylabel('Z Position')
+                plt.colorbar(im1, ax=ax1)
+                self._add_v60_outline_fixed(ax1, 'xz')
+                
+                # 2. 壓力梯度
+                if 'pressure_gradient_magnitude' in pressure_analysis:
+                    grad_p = pressure_analysis['pressure_gradient_magnitude']
+                    grad_slice = grad_p[:, config.NY//2, :]
+                    im2 = ax2.imshow(grad_slice.T, origin='lower', aspect='auto', 
+                                   cmap='plasma', vmin=0, vmax=np.percentile(grad_slice, 95))
+                    ax2.set_title('Pressure Gradient Magnitude (Pa/m)', fontsize=12)
+                    ax2.set_xlabel('X Position')
+                    ax2.set_ylabel('Z Position')
+                    plt.colorbar(im2, ax=ax2)
+                    self._add_v60_outline_fixed(ax2, 'xz')
+                
+                # 3. 壓力係數
+                if 'pressure_coefficient' in pressure_analysis:
+                    cp = pressure_analysis['pressure_coefficient']
+                    cp_slice = cp[:, config.NY//2, :]
+                    im3 = ax3.imshow(cp_slice.T, origin='lower', aspect='auto', 
+                                   cmap='RdBu_r', vmin=-2, vmax=2)
+                    ax3.set_title('Pressure Coefficient Cp', fontsize=12)
+                    ax3.set_xlabel('X Position')
+                    ax3.set_ylabel('Z Position')
+                    plt.colorbar(im3, ax=ax3)
+                    self._add_v60_outline_fixed(ax3, 'xz')
+                
+                # 4. 沿程壓力分佈
+                if 'pressure_profile' in pressure_analysis:
+                    pressure_profile = pressure_analysis['pressure_profile']
+                    z_coords = np.arange(len(pressure_profile))
+                    ax4.plot(pressure_profile, z_coords, 'b-', linewidth=2, label='Pressure Profile')
+                    ax4.set_xlabel('Pressure (Pa)')
+                    ax4.set_ylabel('Z Position')
+                    ax4.set_title('Streamwise Pressure Distribution', fontsize=12)
+                    ax4.grid(True)
+                    ax4.legend()
+                    
+                    # 添加壓力損失標註
+                    pressure_drop = pressure_analysis.get('pressure_drop_total', 0)
+                    ax4.text(0.05, 0.95, f'ΔP = {pressure_drop:.2f} Pa', 
+                           transform=ax4.transAxes, fontsize=10, 
+                           bbox=dict(boxstyle="round,pad=0.3", facecolor="yellow", alpha=0.5))
+            
+            plt.suptitle(f'CFD Pressure Field Analysis (t={physical_time:.2f}s)', fontsize=14)
+            filename = self.get_output_path(f'cfd_pressure_analysis_step_{step_num:04d}.png')
+            fig.suptitle(f'CFD Pressure Field Analysis - Step {step_num}', fontsize=14)
+            plt.savefig(filename, dpi=300, bbox_inches='tight')
+            plt.close()
+            
+            return filename
+            
+        except Exception as e:
+            print(f"Warning: Pressure field analysis failed: {e}")
+            return None
+    
+    def save_turbulence_analysis(self, simulation_time, step_num):
+        """保存湍流特徵分析圖"""
+        try:
+            fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(14, 10))
+            
+            # 計算流體特徵
+            flow_chars = self.calculate_flow_characteristics()
+            turbulence_analysis = flow_chars.get('turbulence_analysis', {})
+            physical_time = step_num * config.SCALE_TIME
+            
+            if hasattr(self.lbm, 'u'):
+                u_data = self.lbm.u.to_numpy()
+                
+                # 1. Q-criterion
+                if 'q_criterion' in turbulence_analysis:
+                    q_field = turbulence_analysis['q_criterion']
+                    q_slice = q_field[:, config.NY//2, :]
+                    # 只顯示正值區域 (渦流區域)
+                    q_positive = np.where(q_slice > 0, q_slice, 0)
+                    im1 = ax1.imshow(q_positive.T, origin='lower', aspect='auto', 
+                                   cmap='viridis', vmin=0, vmax=np.percentile(q_positive[q_positive>0], 90) if np.any(q_positive>0) else 1)
+                    ax1.set_title('Q-Criterion (Vortex Identification)', fontsize=12)
+                    ax1.set_xlabel('X Position')
+                    ax1.set_ylabel('Z Position')
+                    plt.colorbar(im1, ax=ax1)
+                    self._add_v60_outline_fixed(ax1, 'xz')
+                
+                # 2. λ2-criterion
+                if 'lambda2_criterion' in turbulence_analysis:
+                    lambda2_field = turbulence_analysis['lambda2_criterion']
+                    lambda2_slice = lambda2_field[:, config.NY//2, :]
+                    # 只顯示負值區域 (渦流區域)
+                    lambda2_negative = np.where(lambda2_slice < 0, -lambda2_slice, 0)
+                    im2 = ax2.imshow(lambda2_negative.T, origin='lower', aspect='auto', 
+                                   cmap='plasma', vmin=0, vmax=np.percentile(lambda2_negative[lambda2_negative>0], 90) if np.any(lambda2_negative>0) else 1)
+                    ax2.set_title('λ2-Criterion (Vortex Identification)', fontsize=12)
+                    ax2.set_xlabel('X Position')
+                    ax2.set_ylabel('Z Position')
+                    plt.colorbar(im2, ax=ax2)
+                    self._add_v60_outline_fixed(ax2, 'xz')
+                
+                # 3. 湍流強度
+                if 'turbulence_intensity' in turbulence_analysis:
+                    ti_field = turbulence_analysis['turbulence_intensity']
+                    ti_slice = ti_field[:, config.NY//2, :]
+                    im3 = ax3.imshow(ti_slice.T, origin='lower', aspect='auto', 
+                                   cmap='hot', vmin=0, vmax=np.percentile(ti_slice, 95))
+                    ax3.set_title('Turbulence Intensity', fontsize=12)
+                    ax3.set_xlabel('X Position')
+                    ax3.set_ylabel('Z Position')
+                    plt.colorbar(im3, ax=ax3)
+                    self._add_v60_outline_fixed(ax3, 'xz')
+                
+                # 4. 耗散率
+                if 'dissipation_rate' in turbulence_analysis:
+                    dissipation_field = turbulence_analysis['dissipation_rate']
+                    dissipation_slice = dissipation_field[:, config.NY//2, :]
+                    im4 = ax4.imshow(dissipation_slice.T, origin='lower', aspect='auto', 
+                                   cmap='inferno', vmin=0, vmax=np.percentile(dissipation_slice, 95))
+                    ax4.set_title('Turbulent Dissipation Rate', fontsize=12)
+                    ax4.set_xlabel('X Position')
+                    ax4.set_ylabel('Z Position')
+                    plt.colorbar(im4, ax=ax4)
+                    self._add_v60_outline_fixed(ax4, 'xz')
+                    
+                    # 添加湍流統計
+                    tke = turbulence_analysis.get('turbulent_kinetic_energy', 0)
+                    ax4.text(0.05, 0.95, f'TKE = {tke:.2e}', 
+                           transform=ax4.transAxes, fontsize=10, 
+                           bbox=dict(boxstyle="round,pad=0.3", facecolor="yellow", alpha=0.5))
+            
+            plt.suptitle(f'CFD Turbulence Analysis (t={physical_time:.2f}s)', fontsize=14)
+            filename = self.get_output_path(f'cfd_turbulence_analysis_step_{step_num:04d}.png')
+            fig.suptitle(f'CFD Turbulence Analysis - Step {step_num}', fontsize=14)
+            plt.savefig(filename, dpi=300, bbox_inches='tight')
+            plt.close()
+            
+            return filename
+            
+        except Exception as e:
+            print(f"Warning: Turbulence analysis failed: {e}")
+            return None
+    
+    def save_dimensionless_analysis(self, simulation_time, step_num):
+        """保存無量綱數分析圖"""
+        try:
+            fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(14, 10))
+            
+            # 計算流體特徵
+            flow_chars = self.calculate_flow_characteristics()
+            dimensionless = flow_chars.get('dimensionless_numbers', {})
+            physical_time = step_num * config.SCALE_TIME
+            
+            # 1. 局部Reynolds數分佈
+            if 'local_reynolds_field' in dimensionless:
+                re_field = dimensionless['local_reynolds_field']
+                re_slice = re_field[:, config.NY//2, :]
+                im1 = ax1.imshow(re_slice.T, origin='lower', aspect='auto', 
+                               cmap='viridis', vmin=0, vmax=np.percentile(re_slice, 95))
+                ax1.set_title('Local Reynolds Number', fontsize=12)
+                ax1.set_xlabel('X Position')
+                ax1.set_ylabel('Z Position')
+                plt.colorbar(im1, ax=ax1)
+                self._add_v60_outline_fixed(ax1, 'xz')
+                
+                # 添加統計信息
+                re_max = dimensionless.get('local_reynolds_max', 0)
+                re_mean = dimensionless.get('local_reynolds_mean', 0)
+                ax1.text(0.05, 0.95, f'Re_max = {re_max:.1f}\nRe_mean = {re_mean:.1f}', 
+                       transform=ax1.transAxes, fontsize=10, 
+                       bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8))
+            
+            # 2. 無量綱數柱狀圖
+            dimensionless_values = [
+                ('Re', flow_chars.get('reynolds_number', 0)),
+                ('We', flow_chars.get('weber_number', 0)),
+                ('Fr', flow_chars.get('froude_number', 0)),
+                ('Ca', dimensionless.get('capillary_number', 0)),
+                ('Bo', dimensionless.get('bond_number', 0)),
+                ('Pe', dimensionless.get('peclet_number', 0))
+            ]
+            
+            names = [item[0] for item in dimensionless_values]
+            values = [item[1] for item in dimensionless_values]
+            
+            bars = ax2.bar(names, values, color=['blue', 'red', 'green', 'orange', 'purple', 'brown'])
+            ax2.set_title('Dimensionless Numbers', fontsize=12)
+            ax2.set_ylabel('Value')
+            ax2.set_yscale('log')
+            
+            # 添加數值標籤
+            for bar, value in zip(bars, values):
+                height = bar.get_height()
+                ax2.text(bar.get_x() + bar.get_width()/2., height,
+                       f'{value:.2e}', ha='center', va='bottom', fontsize=8)
+            
+            # 3. 流動特徵圖
+            if hasattr(self.lbm, 'u'):
+                u_data = self.lbm.u.to_numpy()
+                flow_topology = flow_chars.get('flow_topology', {})
+                
+                # 流線曲率
+                if 'streamline_curvature' in flow_topology:
+                    curvature = flow_topology['streamline_curvature']
+                    curvature_slice = curvature[:, config.NY//2, :]
+                    im3 = ax3.imshow(curvature_slice.T, origin='lower', aspect='auto', 
+                                   cmap='coolwarm', vmin=0, vmax=np.percentile(curvature_slice, 95))
+                    ax3.set_title('Streamline Curvature', fontsize=12)
+                    ax3.set_xlabel('X Position')
+                    ax3.set_ylabel('Z Position')
+                    plt.colorbar(im3, ax=ax3)
+                    self._add_v60_outline_fixed(ax3, 'xz')
+                    
+                    # 添加分離點標記
+                    separation_points = flow_topology.get('separation_points', {})
+                    if separation_points.get('count', 0) > 0:
+                        for loc in separation_points['locations'][:10]:  # 最多顯示10個點
+                            if loc[1] == config.NY//2:  # 只顯示當前切面的點
+                                ax3.plot(loc[0], loc[2], 'ro', markersize=6, label='Separation')
+            
+            # 4. CFD質量指標
+            conservation = flow_chars.get('mass_conservation', {})
+            stability_metrics = [
+                ('Mass Variation', conservation.get('mass_variation_coefficient', 0)),
+                ('Max Velocity', flow_chars.get('max_velocity_physical', 0)),
+                ('Pressure Drop', flow_chars.get('pressure_drop_pa', 0) / 1000),  # kPa
+            ]
+            
+            metric_names = [item[0] for item in stability_metrics]
+            metric_values = [item[1] for item in stability_metrics]
+            
+            bars4 = ax4.bar(metric_names, metric_values, color=['cyan', 'magenta', 'yellow'])
+            ax4.set_title('CFD Quality Metrics', fontsize=12)
+            ax4.set_ylabel('Value')
+            
+            # 添加數值標籤
+            for bar, value in zip(bars4, metric_values):
+                height = bar.get_height()
+                ax4.text(bar.get_x() + bar.get_width()/2., height,
+                       f'{value:.3f}', ha='center', va='bottom', fontsize=9)
+            
+            plt.suptitle(f'CFD Dimensionless Analysis (t={physical_time:.2f}s)', fontsize=14)
+            filename = self.get_output_path(f'cfd_dimensionless_analysis_step_{step_num:04d}.png')
+            fig.suptitle(f'CFD Dimensionless Numbers Analysis - Step {step_num}', fontsize=14)
+            plt.savefig(filename, dpi=300, bbox_inches='tight')
+            plt.close()
+            
+            return filename
+            
+        except Exception as e:
+            print(f"Warning: Dimensionless analysis failed: {e}")
+            return None
+    
+    def save_boundary_layer_analysis(self, simulation_time, step_num):
+        """保存邊界層分析圖"""
+        try:
+            fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(14, 10))
+            
+            # 計算流體特徵
+            flow_chars = self.calculate_flow_characteristics()
+            boundary_analysis = flow_chars.get('boundary_layer_analysis', {})
+            physical_time = step_num * config.SCALE_TIME
+            
+            if hasattr(self.lbm, 'u'):
+                u_data = self.lbm.u.to_numpy()
+                
+                # 1. 邊界層厚度分佈
+                if 'boundary_layer_thickness' in boundary_analysis:
+                    bl_thickness = boundary_analysis['boundary_layer_thickness']
+                    im1 = ax1.imshow(bl_thickness.T, origin='lower', aspect='equal', 
+                                   cmap='viridis', vmin=0, vmax=np.percentile(bl_thickness, 95))
+                    ax1.set_title('Boundary Layer Thickness', fontsize=12)
+                    ax1.set_xlabel('X Position')
+                    ax1.set_ylabel('Y Position')
+                    plt.colorbar(im1, ax=ax1)
+                    self._add_v60_outline_fixed(ax1, 'xy')
+                
+                # 2. 壁面剪應力
+                if 'wall_shear_stress' in boundary_analysis:
+                    wall_shear = boundary_analysis['wall_shear_stress']
+                    shear_slice = wall_shear[:, config.NY//2, :]
+                    im2 = ax2.imshow(shear_slice.T, origin='lower', aspect='auto', 
+                                   cmap='plasma', vmin=0, vmax=np.percentile(shear_slice, 95))
+                    ax2.set_title('Wall Shear Stress', fontsize=12)
+                    ax2.set_xlabel('X Position')
+                    ax2.set_ylabel('Z Position')
+                    plt.colorbar(im2, ax=ax2)
+                    self._add_v60_outline_fixed(ax2, 'xz')
+                
+                # 3. 速度剖面示例
+                center_x, center_y = config.NX//2, config.NY//2
+                radius_pos = int(center_x + config.TOP_RADIUS / config.SCALE_LENGTH * 0.7)
+                
+                if radius_pos < config.NX:
+                    velocity_profile = np.sqrt(
+                        u_data[radius_pos, center_y, :]**2 + 
+                        u_data[radius_pos, center_y, :]**2 + 
+                        u_data[radius_pos, center_y, :]**2
+                    )
+                    z_coords = np.arange(len(velocity_profile))
+                    
+                    ax3.plot(velocity_profile, z_coords, 'b-', linewidth=2, label='Velocity Profile')
+                    ax3.set_xlabel('Velocity (lu/ts)')
+                    ax3.set_ylabel('Z Position')
+                    ax3.set_title('Near-Wall Velocity Profile', fontsize=12)
+                    ax3.grid(True)
+                    ax3.legend()
+                
+                # 4. 邊界層參數統計
+                displacement_thickness = boundary_analysis.get('displacement_thickness', 0)
+                momentum_thickness = boundary_analysis.get('momentum_thickness', 0)
+                shape_factor = boundary_analysis.get('shape_factor', 0)
+                
+                bl_params = ['δ* (Displacement)', 'θ (Momentum)', 'H (Shape Factor)']
+                bl_values = [displacement_thickness, momentum_thickness, shape_factor]
+                
+                bars = ax4.bar(bl_params, bl_values, color=['blue', 'red', 'green'])
+                ax4.set_title('Boundary Layer Parameters', fontsize=12)
+                ax4.set_ylabel('Value')
+                
+                # 添加數值標籤
+                for bar, value in zip(bars, bl_values):
+                    height = bar.get_height()
+                    ax4.text(bar.get_x() + bar.get_width()/2., height,
+                           f'{value:.3f}', ha='center', va='bottom', fontsize=9)
+            
+            plt.suptitle(f'CFD Boundary Layer Analysis (t={physical_time:.2f}s)', fontsize=14)
+            filename = self.get_output_path(f'cfd_boundary_layer_analysis_step_{step_num:04d}.png')
+            fig.suptitle(f'CFD Boundary Layer Analysis - Step {step_num}', fontsize=14)
+            plt.savefig(filename, dpi=300, bbox_inches='tight')
+            plt.close()
+            
+            return filename
+            
+        except Exception as e:
+            print(f"Warning: Boundary layer analysis failed: {e}")
+            return None
     
     def export_data_for_analysis(self, simulation_time, step_num):
         """導出數據供外部分析工具使用"""
@@ -329,7 +1133,7 @@ class EnhancedVisualizer:
                 }
                 
                 export_data['density_field'] = rho_data.tolist()
-                export_data['pressure_field'] = (rho_data * config.CS2_LU).tolist()
+                export_data['pressure_field'] = (rho_data * config.CS2).tolist()
             
             # 顆粒數據
             if self.particles:
@@ -444,8 +1248,8 @@ class EnhancedVisualizer:
                     # 添加顆粒可視化
                     self._add_particles_to_plot(ax2, 'xz', config.NY//2)
             
-            filename = f'v60_longitudinal_analysis_step_{step_num:04d}.png'
-            plt.tight_layout()
+            filename = self.get_output_path(f'v60_longitudinal_analysis_step_{step_num:04d}.png')
+            fig.suptitle(f'V60 Longitudinal Analysis - Step {step_num}', fontsize=14)
             plt.savefig(filename, dpi=300, bbox_inches='tight')
             plt.close()
             
@@ -489,8 +1293,8 @@ class EnhancedVisualizer:
                 # 添加顆粒可視化
                 self._add_particles_to_plot(ax, 'xy', z_level)
             
-            filename = f'velocity_analysis_step_{step_num:04d}.png'
-            plt.tight_layout()
+            filename = self.get_output_path(f'velocity_analysis_step_{step_num:04d}.png')
+            fig.suptitle(f'Velocity Field Analysis - Step {step_num}', fontsize=14)
             plt.savefig(filename, dpi=300, bbox_inches='tight')
             plt.close()
             
@@ -557,8 +1361,8 @@ class EnhancedVisualizer:
                 self._add_particles_to_plot(ax4, 'xy', config.NZ//2)
             
             plt.suptitle(f'Combined Analysis (t={physical_time:.2f}s)', fontsize=14)
-            filename = f'combined_analysis_step_{step_num:04d}.png'
-            plt.tight_layout()
+            filename = self.get_output_path(f'combined_analysis_step_{step_num:04d}.png')
+            fig.suptitle(f'Combined Multi-Physics Analysis - Step {step_num}', fontsize=14)
             plt.savefig(filename, dpi=300, bbox_inches='tight')
             plt.close()
             
@@ -854,8 +1658,8 @@ class EnhancedVisualizer:
             
             plt.suptitle(f'LBM Comprehensive Diagnostics (t={step_num * config.SCALE_TIME:.2f}s)', fontsize=14)
             
-            filename = f'lbm_monitoring_step_{step_num:04d}.png'
-            plt.tight_layout()
+            filename = self.get_output_path(f'lbm_monitoring_step_{step_num:04d}.png')
+            fig.suptitle(f'LBM System Monitoring - Step {step_num}', fontsize=14)
             plt.savefig(filename, dpi=300, bbox_inches='tight')
             plt.close()
             

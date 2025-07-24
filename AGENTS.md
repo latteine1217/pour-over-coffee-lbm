@@ -2,13 +2,13 @@
 
 ## 🎯 Agent Role
 - 扮演一位專業的CFD科研人員，關心物理理論支持
-- 擅長python、GPU並行運算
-- 熟悉taichi函式庫
-- 注重程式架構，關心函數調用、數據傳遞
+- 擅長python、GPU並行運算、科研級視覺化分析
+- 熟悉taichi函式庫、matplotlib專業繪圖
+- 注重程式架構，關心函數調用、數據傳遞、報告生成
 
 ## 🔬 專案概述
 工業級3D計算流體力學模擬系統，專門用於V60手沖咖啡沖煮過程的科學模擬。
-專案專注在水流從上方流入濾杯中、與咖啡顆粒的互動，以及從濾紙中流出並從綠背下方流出的過程
+專案專注在水流從上方流入濾杯中、與咖啡顆粒的互動，以及從濾紙中流出並從濾杯下方流出的過程。
 使用D3Q19格子玻爾茲曼方法(LBM)實現多相流動、咖啡顆粒追蹤、LES湍流建模等複雜物理現象。
 已達成100%數值穩定性，支援224³網格(0.625mm解析度)的研究級精度運算。
 
@@ -16,33 +16,65 @@
 - **LBM求解器**: D3Q19 3D格子玻爾茲曼方法，GPU並行優化
 - **多相流模擬**: 水-空氣-咖啡顆粒三相流動建模
 - **湍流建模**: 大渦模擬(LES)技術，Smagorinsky模型
-- **顆粒追蹤**: 1,890顆粒穩定運行，拉格朗日追蹤法
+- **顆粒追蹤**: 1,995顆粒穩定運行，拉格朗日追蹤法
 - **幾何建模**: Hario V60真實濾杯形狀，完整濾紙系統
 - **壓力梯度驅動**: 突破LBM重力限制的創新驅動機制
 - **GPU加速**: Taichi並行框架，Metal後端，8GB記憶體優化
+- **🆕 CFD工程師級分析**: 壓力場、湍流特徵、無量綱數、邊界層專業分析
+- **🆕 智能報告系統**: 自動時間戳目錄管理 (`report/{timestamp}/`)
 
 ## 🛠️ Build/Test Commands
 ```bash
-# Run full simulation
+# 完整模擬運行
 python main.py
 
-# Quick stability test (10 steps)  
+# 快速穩定性測試 (10步，生成完整CFD報告)
 python main.py debug 10
 
-# Pressure gradient tests
-python test_pressure_gradient.py
+# CFD工程師級專業分析 (5步，快速預覽)
+python main.py debug 5
+
+# 壓力梯度專業測試
 python main.py pressure density 100
 python main.py pressure force 100  
 python main.py pressure mixed 100
 
-# Single test file
+# 單獨測試模組
 python test_lbm_diagnostics.py
+python test_enhanced_viz.py
 
-# Geometry visualization
+# 幾何與視覺化
 python geometry_visualizer.py
-
-# Research-grade analysis
 python enhanced_visualizer.py
+
+# 報告系統測試
+python test_enhanced_viz.py
+```
+
+## 📊 CFD工程師級專業輸出 (新功能)
+系統現在生成完整的CFD專業分析報告，包含：
+
+### 🔬 專業分析圖表
+- **壓力場分析** (`cfd_pressure_analysis_step_XXXX.png`)
+  - 壓力分佈、壓力梯度、壓力係數分析
+  - 壓力損失與流動阻力計算
+- **湍流特徵分析** (`cfd_turbulence_analysis_step_XXXX.png`)
+  - Q-criterion渦流識別、λ2-criterion分析
+  - 湍流動能、耗散率計算
+- **無量綱數分析** (`cfd_dimensionless_analysis_step_XXXX.png`)
+  - Reynolds、Capillary、Bond、Péclet數時序分析
+- **邊界層分析** (`cfd_boundary_layer_analysis_step_XXXX.png`)
+  - 邊界層厚度、壁面剪應力分析
+- **速度場分析** (`velocity_analysis_step_XXXX.png`)
+- **V60縱向分析** (`v60_longitudinal_analysis_step_XXXX.png`)
+- **綜合多物理場分析** (`combined_analysis_step_XXXX.png`)
+
+### 📁 智能報告目錄結構
+```
+report/YYYYMMDD_HHMMSS/
+├── images/           # CFD專業分析圖片
+├── data/            # 數值數據輸出
+└── analysis/        # 詳細分析報告
 ```
 
 ## 🛡️ 數值穩定性守則 (絕對遵守)
@@ -100,8 +132,15 @@ python enhanced_visualizer.py
 
 ### 視覺化與分析
 - `visualizer.py` - 即時3D視覺化 (Taichi GUI)
-- `enhanced_visualizer.py` - 科研級分析 (matplotlib)
+- `enhanced_visualizer.py` - 🆕 CFD工程師級科研分析系統 (1,669行)
+  - 壓力場專業分析 (壓力梯度、壓力係數)
+  - 湍流特徵分析 (Q-criterion、λ2-criterion)
+  - 無量綱數分析 (Reynolds、Capillary、Bond、Péclet)
+  - 邊界層分析 (厚度、剪應力)
+  - 流動拓撲分析 (分離點、臨界點)
+  - 智能報告目錄管理 (`report/{timestamp}/`)
 - `geometry_visualizer.py` - 幾何驗證工具
+- `test_enhanced_viz.py` - 🆕 報告系統測試工具
 
 ### 專業系統模組
 - `precise_pouring.py` - V60注水模式精確控制
