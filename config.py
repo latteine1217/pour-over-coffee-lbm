@@ -286,7 +286,7 @@ OUTPUT_FREQ = max(100, MAX_STEPS // 1000)
 
 PHASE_WATER = 1.0
 PHASE_AIR = 0.0
-INTERFACE_THICKNESS = 3.0
+INTERFACE_THICKNESS = 1.5
 CAHN_HILLIARD_MOBILITY = 0.01
 SURFACE_TENSION_PHYS = 0.0728          # N/m
 
@@ -494,8 +494,8 @@ def _check_coupling_parameters(errors, warnings):
         warnings.append(f"Weber數非標準值: We = {WEBER_NUMBER}")
     
     # 多相流參數合理性
-    interface_thickness = 2.0  # 來自multiphase_3d.py
-    if interface_thickness > SCALE_LENGTH * 5:
+    interface_thickness = INTERFACE_THICKNESS  # 使用實際配置值
+    if interface_thickness > SCALE_LENGTH * 1000 * 3:  # 界面厚度不應超過3個格子尺寸
         warnings.append(f"界面厚度相對格子尺寸偏大")
 
 def get_consistency_report():

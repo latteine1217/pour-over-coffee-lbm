@@ -389,3 +389,168 @@ class MultiphaseFlow3D:
         self.apply_phase_separation()
         self.copy_phase_field()
         self.update_density_from_phase()
+    
+    # ====================
+    # 初始狀態標準化系統 (CFD一致性優化)
+    # ====================
+    
+    def validate_initial_phase_consistency(self):
+        """
+        驗證多相流初始狀態一致性 (CFD一致性優化)
+        
+        檢查多相流初始狀態與邊界條件、幾何設置的一致性，
+        確保初始化階段各模組間沒有衝突。
+        
+        Validation Checks:
+            1. 相場初始值範圍 [-1, 1]
+            2. 密度場與相場對應關係
+            3. 固體區域相場處理
+            4. 邊界區域相場狀態
+            
+        Physics Consistency:
+            - 乾燥V60濾杯: 全域氣相 (φ = -1)
+            - 注水前狀態: 無水相存在
+            - 固體區域: 相場無定義
+            - 邊界條件: 與相場演化相容
+        """
+        print("🔍 驗證多相流初始狀態一致性...")
+        
+        try:
+            # 檢查1: 相場值範圍
+            self._check_phase_field_range()
+            
+            # 檢查2: 密度-相場對應關係
+            self._check_density_phase_consistency()
+            
+            # 檢查3: 固體區域處理
+            self._check_solid_region_phase()
+            
+            # 檢查4: 初始狀態物理合理性
+            self._check_initial_physics()
+            
+            print("   └─ ✅ 多相流初始狀態一致性驗證通過")
+            
+        except Exception as e:
+            print(f"   └─ ❌ 多相流一致性驗證失敗: {e}")
+            raise
+    
+    @ti.kernel
+    def _check_phase_field_range_kernel(self) -> ti.i32:
+        """檢查相場值範圍的核心"""
+        error_count = 0
+        for i, j, k in ti.ndrange(config.NX, config.NY, config.NZ):
+            phi_val = self.phi[i, j, k]
+            if phi_val < -1.1 or phi_val > 1.1:  # 允許小量數值誤差
+                error_count += 1
+                if error_count < 5:  # 只報告前5個錯誤
+                    print(f"相場值超出範圍: phi[{i},{j},{k}] = {phi_val}")
+        return error_count
+    
+    def _check_phase_field_range(self):
+        """檢查相場值範圍"""
+        error_count = self._check_phase_field_range_kernel()
+        if error_count > 0:
+            raise ValueError(f"發現 {error_count} 個相場值超出合理範圍 [-1,1]")
+    
+    @ti.kernel  
+    def _check_density_consistency_kernel(self) -> ti.i32:
+        """檢查密度-相場一致性的核心"""
+        inconsistency_count = 0
+        for i, j, k in ti.ndrange(config.NX, config.NY, config.NZ):
+            if self.lbm.solid[i, j, k] == 0:  # 只檢查流體區域
+                phi_val = self.phi[i, j, k] 
+                rho_val = self.lbm.rho[i, j, k]
+                
+                # 計算期望密度
+                expected_rho = (config.RHO_WATER * (1.0 + phi_val) + 
+                              config.RHO_AIR * (1.0 - phi_val)) * 0.5
+                
+                # 檢查一致性 (允許5%誤差)
+                relative_error = ti.abs(rho_val - expected_rho) / expected_rho
+                if relative_error > 0.05:
+                    inconsistency_count += 1
+                    
+        return inconsistency_count
+    
+    def _check_density_phase_consistency(self):
+        """檢查密度場與相場的對應關係"""
+        inconsistency_count = self._check_density_consistency_kernel()
+        if inconsistency_count > 0:
+            print(f"   ⚠️  發現 {inconsistency_count} 個密度-相場不一致點 (可接受)")
+    
+    @ti.kernel
+    def _check_solid_phase_kernel(self) -> ti.i32:
+        """檢查固體區域相場處理"""
+        solid_count = 0
+        for i, j, k in ti.ndrange(config.NX, config.NY, config.NZ):
+            if self.lbm.solid[i, j, k] == 1:  # 固體區域
+                solid_count += 1
+        return solid_count
+    
+    def _check_solid_region_phase(self):
+        """檢查固體區域相場處理"""
+        solid_count = self._check_solid_phase_kernel()
+        print(f"   ├─ 固體節點數量: {solid_count:,}")
+        
+    @ti.kernel
+    def _check_initial_air_phase_kernel(self) -> ti.f32:
+        """檢查初始氣相比例"""
+        air_count = 0
+        total_fluid_count = 0
+        
+        for i, j, k in ti.ndrange(config.NX, config.NY, config.NZ):
+            if self.lbm.solid[i, j, k] == 0:  # 流體區域
+                total_fluid_count += 1
+                if self.phi[i, j, k] < -0.5:  # 氣相主導
+                    air_count += 1
+                    
+        return ti.cast(air_count, ti.f32) / ti.cast(total_fluid_count, ti.f32)
+    
+    def _check_initial_physics(self):
+        """檢查初始狀態物理合理性"""
+        air_ratio = self._check_initial_air_phase_kernel()
+        print(f"   ├─ 初始氣相比例: {air_ratio*100:.1f}%")
+        
+        if air_ratio < 0.9:
+            print(f"   ⚠️  初始狀態非乾燥濾杯 (氣相比例 < 90%)")
+        else:
+            print(f"   ├─ ✅ 初始乾燥狀態合理")
+    
+    def standardize_initial_state(self, force_dry_state=True):
+        """
+        標準化初始狀態 (CFD一致性優化)
+        
+        統一設置多相流初始狀態，確保與注水系統、邊界條件
+        的一致性和協調性。
+        
+        Args:
+            force_dry_state: 強制設置為乾燥狀態 (推薦)
+            
+        Standard Initial State:
+            - 流體區域: 完全氣相 (φ = -1.0)
+            - 固體區域: 保持不變
+            - 密度場: 根據相場更新
+            - 化學勢: 重新計算
+        """
+        print("🔧 標準化多相流初始狀態...")
+        
+        if force_dry_state:
+            self._set_dry_initial_state()
+        
+        # 更新關聯場
+        self.update_density_from_phase()
+        self.compute_chemical_potential()
+        self.compute_gradients()
+        
+        # 驗證設置結果
+        self.validate_initial_phase_consistency()
+        
+        print("   └─ ✅ 多相流初始狀態標準化完成")
+    
+    @ti.kernel
+    def _set_dry_initial_state(self):
+        """設置乾燥初始狀態"""
+        for i, j, k in ti.ndrange(config.NX, config.NY, config.NZ):
+            if self.lbm.solid[i, j, k] == 0:  # 只處理流體區域
+                self.phi[i, j, k] = -1.0  # 完全氣相
+                self.phi_new[i, j, k] = -1.0

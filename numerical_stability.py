@@ -9,6 +9,10 @@
 import taichi as ti
 import numpy as np
 import config
+from init import initialize_taichi_once
+
+# 確保Taichi已正確初始化
+initialize_taichi_once()
 
 @ti.data_oriented
 class NumericalStabilityMonitor:
@@ -59,9 +63,9 @@ class NumericalStabilityMonitor:
             if solver.solid[i, j, k] == 0:  # 流體節點
                 # 檢查密度
                 rho = solver.rho[i, j, k]
-                if ti.isnan(rho):
+                if ti.math.isnan(rho):
                     self.nan_count[None] += 1
-                elif ti.isinf(rho):
+                elif ti.math.isinf(rho):
                     self.inf_count[None] += 1
                 else:
                     ti.atomic_min(self.min_density[None], rho)
@@ -70,9 +74,9 @@ class NumericalStabilityMonitor:
                 # 檢查速度
                 u = solver.u[i, j, k]
                 u_mag = u.norm()
-                if ti.isnan(u_mag):
+                if ti.math.isnan(u_mag):
                     self.nan_count[None] += 1
-                elif ti.isinf(u_mag):
+                elif ti.math.isinf(u_mag):
                     self.inf_count[None] += 1
                 else:
                     ti.atomic_max(self.max_velocity[None], u_mag)
@@ -80,9 +84,9 @@ class NumericalStabilityMonitor:
                 # 檢查分佈函數
                 for q in range(config.Q_3D):
                     f_val = solver.f[q, i, j, k]
-                    if ti.isnan(f_val):
+                    if ti.math.isnan(f_val):
                         self.nan_count[None] += 1
-                    elif ti.isinf(f_val):
+                    elif ti.math.isinf(f_val):
                         self.inf_count[None] += 1
         
         # 評估穩定性狀態
@@ -148,7 +152,7 @@ class NumericalStabilityMonitor:
             if solver.solid[i, j, k] == 0:  # 流體節點
                 # 修復密度
                 rho = solver.rho[i, j, k]
-                if ti.isnan(rho) or ti.isinf(rho) or rho <= 0:
+                if ti.math.isnan(rho) or ti.math.isinf(rho) or rho <= 0:
                     solver.rho[i, j, k] = 1.0  # 重置為參考密度
                 elif rho > self.MAX_DENSITY_THRESHOLD:
                     solver.rho[i, j, k] = self.MAX_DENSITY_THRESHOLD
@@ -158,7 +162,7 @@ class NumericalStabilityMonitor:
                 # 修復速度
                 u = solver.u[i, j, k]
                 u_mag = u.norm()
-                if ti.isnan(u_mag) or ti.isinf(u_mag):
+                if ti.math.isnan(u_mag) or ti.math.isinf(u_mag):
                     solver.u[i, j, k] = ti.Vector([0.0, 0.0, 0.0])
                 elif u_mag > self.MAX_VELOCITY_THRESHOLD:
                     solver.u[i, j, k] = u * (self.MAX_VELOCITY_THRESHOLD / u_mag)
@@ -169,7 +173,7 @@ class NumericalStabilityMonitor:
                 
                 for q in range(config.Q_3D):
                     f_val = solver.f[q, i, j, k]
-                    if ti.isnan(f_val) or ti.isinf(f_val):
+                    if ti.math.isnan(f_val) or ti.math.isinf(f_val):
                         # 重置為平衡分佈
                         solver.f[q, i, j, k] = solver._compute_stable_equilibrium(
                             q, rho_safe, u_safe)

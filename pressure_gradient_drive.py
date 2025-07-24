@@ -19,15 +19,15 @@ class PressureGradientDrive:
         """
         self.lbm = lbm_solver
         
-        # 壓力梯度參數 - 中等增強版 (50-70% 提升)
-        self.HIGH_PRESSURE_RATIO = 1.6      # 高壓區密度倍數 (1.3 → 1.6, +30%)
-        self.LOW_PRESSURE_RATIO = 0.5       # 低壓區密度倍數 (0.8 → 0.5, +30%)
+        # 壓力梯度參數 - 強力增強版 (80-100% 提升)
+        self.HIGH_PRESSURE_RATIO = 1.8      # 高壓區密度倍數 (1.6 → 1.8, +12.5%)
+        self.LOW_PRESSURE_RATIO = 0.4       # 低壓區密度倍數 (0.5 → 0.4, +25%)
         self.HIGH_PRESSURE_ZONE = 0.8       # 高壓區域 (頂部80%以上)
         self.LOW_PRESSURE_ZONE = 0.2        # 低壓區域 (底部20%以下)
-        self.ADJUSTMENT_RATE = 0.015        # 密度調整速率 (0.01 → 0.015, +50%)
+        self.ADJUSTMENT_RATE = 0.025        # 密度調整速率 (0.015 → 0.025, +67%)
         
-        # 體力場參數 - 中等增強版
-        self.MAX_PRESSURE_FORCE = 0.085     # 最大壓力力 (0.05 → 0.085, +70%)
+        # 體力場參數 - 強力增強版
+        self.MAX_PRESSURE_FORCE = 0.12      # 最大壓力力 (0.085 → 0.12, +41%)
         self.GRADIENT_SMOOTHING = 0.1       # 梯度平滑係數
         
         # 驅動模式控制
@@ -42,12 +42,12 @@ class PressureGradientDrive:
         # 統計數據
         self.pressure_stats = ti.field(dtype=ti.f32, shape=10)  # 存儲統計信息
         
-        print("🚀 壓力梯度驅動系統初始化 - 中等增強版")
-        print(f"   ├─ 高壓比例: {self.HIGH_PRESSURE_RATIO:.2f} (+30%)")
-        print(f"   ├─ 低壓比例: {self.LOW_PRESSURE_RATIO:.2f} (+30%)")
-        print(f"   ├─ 調整速率: {self.ADJUSTMENT_RATE:.3f} (+50%)")
-        print(f"   ├─ 最大壓力力: {self.MAX_PRESSURE_FORCE:.3f} lu/ts² (+70%)")
-        print(f"   └─ 增強級別: MEDIUM (預期效果提升2-3倍)")
+        print("🚀 壓力梯度驅動系統初始化 - 強力增強版")
+        print(f"   ├─ 高壓比例: {self.HIGH_PRESSURE_RATIO:.2f} (+50%)")
+        print(f"   ├─ 低壓比例: {self.LOW_PRESSURE_RATIO:.2f} (+50%)")
+        print(f"   ├─ 調整速率: {self.ADJUSTMENT_RATE:.3f} (+150%)")
+        print(f"   ├─ 最大壓力力: {self.MAX_PRESSURE_FORCE:.3f} lu/ts² (+140%)")
+        print(f"   └─ 增強級別: HIGH (預期效果提升3-4倍)")
         
         self.initialize_target_density()
     

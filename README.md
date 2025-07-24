@@ -1,237 +1,254 @@
-# ☕ Pour-Over Coffee CFD Simulation
+# ☕ Pour-Over 咖啡 CFD 流體模擬系統
 
-> **A 3D Computational Fluid Dynamics simulation system for V60 coffee brewing using Lattice Boltzmann Method**  
-> 🤖 **Developed with [opencode](https://opencode.ai) + GitHub Copilot**
+> **V60手沖咖啡沖煮過程的工業級3D計算流體力學模擬系統**  
+> 🤖 **使用 [opencode](https://opencode.ai) + GitHub Copilot 開發**
 
-## 🎯 What is this?
+## 🎯 專案簡介
 
-This project simulates the physics of pour-over coffee brewing with industrial-grade accuracy:
+本專案提供工業級精度的手沖咖啡沖煮物理模擬：
 
-- 💧 **3D water flow** through V60 dripper geometry
-- ☕ **Coffee particle dynamics** (1,995+ particles tracked)
-- 🌊 **Multi-phase flow** (water-air interfaces)  
-- 🔬 **Lattice Boltzmann Method** (D3Q19 model)
-- ⚡ **GPU acceleration** with Taichi framework
-- 📊 **Real-time 3D visualization**
-- 🆕 **CFD Engineer-grade Analysis** with professional reports
-- 🆕 **Smart Report Management** with timestamped directories
+- 💧 **3D水流動力學** - V60濾杯完整幾何建模
+- ☕ **咖啡顆粒追蹤** - 1,995+顆粒拉格朗日追蹤
+- 🌊 **多相流模擬** - 水-空氣界面動力學  
+- 🔬 **格子玻爾茲曼法** - D3Q19高精度數值模型
+- ⚡ **GPU加速運算** - Taichi框架Metal/CUDA並行
+- 📊 **即時3D視覺化** - 專業級CFD分析圖表
+- 🆕 **CFD工程師級分析** - 7種專業分析模式
+- 🆕 **智能報告管理** - 時間戳自動目錄結構
 
-## 🚀 Quick Start
+## 🚀 快速開始
 
-### Requirements
+### 系統需求
 - Python 3.9+
-- 8GB+ GPU memory (recommended)
-- [Taichi](https://github.com/taichi-dev/taichi) framework
+- 8GB+ GPU記憶體（建議）
+- [Taichi](https://github.com/taichi-dev/taichi) 計算框架
 
-### Installation
+### 安裝
 ```bash
 git clone https://github.com/yourusername/pour-over-cfd
 cd pour-over-cfd
 pip install -r requirements.txt
 ```
 
-### Run Simulation
+### 執行模擬
 ```bash
-python main.py                # Full simulation (~10 minutes)
-python main.py debug 10       # Quick test with CFD reports (recommended first)
-python main.py debug 5        # Ultra-quick preview (5 steps)
-python geometry_visualizer.py # Verify V60 geometry
+python main.py                # 完整模擬 (~10分鐘)
+python main.py debug 10       # 快速測試含CFD報告 (推薦首次)
+python main.py debug 5        # 超快速預覽 (5步驟)
+python geometry_visualizer.py # 驗證V60幾何模型
 ```
 
-## 📊 Key Performance Metrics
+## 📊 關鍵性能指標
 
-| Metric | Value | Status |
-|--------|-------|--------|
-| **Grid Resolution** | 224³ (11.2M points) | ✅ Research-grade |
-| **Computational Speed** | 159M+ lattice points/second | ✅ Industrial performance |
-| **Numerical Stability** | 100% convergence rate | ✅ Production-ready |
-| **Memory Usage** | 852 MB | ✅ Efficient |
-| **Test Coverage** | 85%+ | ✅ Enterprise-level |
-| **🆕 CFD Analysis Features** | 7 professional analysis types | ✅ Research-grade |
-| **🆕 Report Generation** | Automated timestamped reports | ✅ Professional workflow |
+| 指標 | 數值 | 狀態 |
+|------|------|------|
+| **網格解析度** | 224³ (1,120萬格點) | ✅ 研究級精度 |
+| **計算速度** | 159M+ 格點/秒 | ✅ 工業級性能 |
+| **數值穩定性** | 100% 收斂率 | ✅ 生產就緒 |
+| **記憶體使用** | 852 MB | ✅ 高效優化 |
+| **測試覆蓋率** | 85%+ | ✅ 企業級標準 |
+| **🆕 CFD分析功能** | 7種專業分析類型 | ✅ 研究級 |
+| **🆕 報告生成** | 自動時間戳報告 | ✅ 專業工作流 |
 
-## 🏗️ System Architecture
+## 🏗️ 系統架構
 
-### Core Components
-- **`main.py`** - Main simulation engine
-- **`lbm_solver.py`** - D3Q19 Lattice Boltzmann solver
-- **`coffee_particles.py`** - Lagrangian particle tracking
-- **`multiphase_3d.py`** - Water-air interface dynamics
-- **`boundary_conditions.py`** - V60 geometry handling
+### 核心模組
+- **`main.py`** - 主模擬引擎
+- **`lbm_solver.py`** - D3Q19格子玻爾茲曼求解器
+- **`coffee_particles.py`** - 拉格朗日顆粒追蹤
+- **`multiphase_3d.py`** - 水-空氣界面動力學
+- **`boundary_conditions.py`** - V60幾何邊界處理
 
-### Visualization System
-- **`visualizer.py`** - Real-time 3D monitoring
-- **`enhanced_visualizer.py`** - 🆕 CFD Engineer-grade Scientific Analysis (1,669 lines)
-  - **Pressure Field Analysis**: Pressure gradients, pressure coefficients, loss calculations
-  - **Turbulence Analysis**: Q-criterion, λ2-criterion, turbulent kinetic energy
-  - **Dimensionless Numbers**: Reynolds, Capillary, Bond, Péclet number tracking
-  - **Boundary Layer Analysis**: Thickness, wall shear stress, separation points
-  - **Flow Topology**: Critical point identification, separation analysis
-  - **Smart Report Management**: Automated `report/{timestamp}/` directory structure
-- **`benchmark_suite.py`** - Performance testing
-- **`test_enhanced_viz.py`** - 🆕 Report system testing
+### 視覺化系統
+- **`visualizer.py`** - 即時3D監控
+- **`enhanced_visualizer.py`** - 🆕 CFD工程師級科學分析 (1,669行)
+  - **壓力場分析**: 壓力梯度、壓力係數、損失計算
+  - **湍流特徵分析**: Q-準則、λ2-準則、湍流動能
+  - **無量綱數分析**: Reynolds、Capillary、Bond、Péclet數追蹤
+  - **邊界層分析**: 厚度、壁面剪應力、分離點
+  - **流動拓撲**: 臨界點識別、分離分析
+  - **智能報告管理**: 自動 `report/{timestamp}/` 目錄結構
+- **`geometry_visualizer.py`** - 🆕 幾何模型專業視覺化
+  - **V60幾何分析**: 完整濾杯濾紙系統建模
+  - **咖啡顆粒分布分析**: 3D分布、密度熱圖、統計分析
+  - **顆粒大小分佈分析**: 統計分布、正態性檢驗、層次分析
+  - **工程製圖**: 尺寸標註、間隙分析、流體路徑
+- **`benchmark_suite.py`** - 性能測試工具
+- **`test_enhanced_viz.py`** - 🆕 報告系統測試
 
-### Documentation
-- **`docs/`** - Comprehensive technical documentation
-  - Mathematical models and equations
-  - Physics modeling details  
-  - Performance analysis reports
-  - Validation and testing procedures
+### 技術文檔
+- **`docs/`** - 完整技術文檔
+  - 數學模型與方程式推導
+  - 物理建模細節  
+  - 性能分析報告
+  - 驗證與測試程序
 
-## 🔬 Scientific Features
+## 🔬 科學功能
 
-### Physics Modeling
-- **Navier-Stokes equations** via Lattice Boltzmann Method
-- **Large Eddy Simulation** (LES) for turbulence
-- **Multiphase flow** with surface tension
-- **Porous media flow** through coffee bed
-- **Particle-fluid coupling** for coffee grounds
+### 物理建模
+- **Navier-Stokes方程** - 格子玻爾茲曼法求解
+- **大渦模擬** (LES) - 湍流建模
+- **多相流動** - 表面張力效應
+- **多孔介質流** - 咖啡床滲透
+- **顆粒-流體耦合** - 咖啡顆粒互動
 
-### 🆕 CFD Engineer-Grade Analysis
-- **Pressure Field Analysis**: Comprehensive pressure gradient and loss analysis
-- **Turbulence Characteristics**: Q-criterion and λ2-criterion vortex identification
-- **Dimensionless Analysis**: Real-time Reynolds, Capillary, Bond, Péclet tracking
-- **Boundary Layer Analysis**: Wall shear stress and separation detection
-- **Flow Topology**: Critical point identification and flow structure analysis
-- **Professional Reports**: Automated generation of research-quality visualizations
+### 🆕 CFD工程師級分析
+- **壓力場分析**: 全面壓力梯度與損失分析
+- **湍流特徵**: Q-準則和λ2-準則渦流識別
+- **無量綱分析**: 即時Reynolds、Capillary、Bond、Péclet追蹤
+- **邊界層分析**: 壁面剪應力與分離檢測
+- **流動拓撲**: 臨界點識別與流動結構分析
+- **專業報告**: 自動生成研究級視覺化
 
-### Numerical Methods
-- **D3Q19 velocity model** for 3D accuracy
-- **BGK collision operator** with forcing
-- **Guo forcing scheme** for body forces
-- **Bounce-back boundaries** for complex geometry
-- **Adaptive time stepping** for stability
+### 數值方法
+- **D3Q19速度模型** - 3D高精度
+- **BGK碰撞算子** - 含外力項
+- **Guo強迫方案** - 體積力處理
+- **反彈邊界** - 複雜幾何處理
+- **自適應時間步** - 穩定性保證
 
-## 📈 Output & Reports
+## 📈 輸出與報告
 
-### 🆕 Professional CFD Reports
-Each simulation automatically generates timestamped professional reports:
+### 🆕 專業CFD報告
+每次模擬自動生成時間戳專業報告：
 
 ```
 report/YYYYMMDD_HHMMSS/
-├── images/
-│   ├── cfd_pressure_analysis_step_XXXX.png      # Pressure field analysis
-│   ├── cfd_turbulence_analysis_step_XXXX.png    # Turbulence characteristics
-│   ├── cfd_dimensionless_analysis_step_XXXX.png # Dimensionless numbers
-│   ├── cfd_boundary_layer_analysis_step_XXXX.png # Boundary layer analysis
-│   ├── velocity_analysis_step_XXXX.png           # Velocity field
-│   ├── v60_longitudinal_analysis_step_XXXX.png   # V60-specific analysis
-│   └── combined_analysis_step_XXXX.png           # Multi-physics overview
-├── data/                                         # Numerical data exports
-└── analysis/                                     # Detailed analysis reports
+├── images/                                    # CFD專業分析圖片
+│   ├── cfd_pressure_analysis_step_XXXX.png        # 壓力場分析
+│   ├── cfd_turbulence_analysis_step_XXXX.png      # 湍流特徵分析
+│   ├── cfd_dimensionless_analysis_step_XXXX.png   # 無量綱數分析
+│   ├── cfd_boundary_layer_analysis_step_XXXX.png  # 邊界層分析
+│   ├── velocity_analysis_step_XXXX.png             # 速度場分析
+│   ├── v60_longitudinal_analysis_step_XXXX.png     # V60縱向分析
+│   └── combined_analysis_step_XXXX.png             # 綜合多物理場
+├── geometry/                                  # 🆕 幾何模型分析
+│   ├── professional_cross_section_analysis.png    # 專業橫截面分析
+│   ├── professional_3d_geometry_model.png         # 3D工程模型
+│   ├── engineering_drawings.png                   # 工程製圖
+│   ├── coffee_particle_distribution.png           # 咖啡顆粒分布分析
+│   └── particle_size_distribution.png             # 顆粒大小分佈分析
+├── data/                                      # 數值數據輸出
+└── analysis/                                  # 詳細分析報告
 ```
 
-### Analysis Features
-- **Pressure Analysis**: Gradient fields, pressure coefficients, loss calculations
-- **Turbulence Analysis**: Vortex identification, turbulent kinetic energy, dissipation
-- **Dimensionless Numbers**: Time-series tracking of critical flow parameters
-- **Boundary Layer**: Wall effects, separation points, shear stress distribution
+### 🆕 幾何視覺化功能
+- **V60幾何分析**: 濾杯濾紙完整建模、尺寸驗證、間隙分析
+- **咖啡顆粒分布**: 3D散點圖、密度熱圖、徑向分佈、角度分析
+- **顆粒大小分佈**: 統計直方圖、累積分佈、正態性檢驗、分層分析
+- **工程製圖**: 專業尺寸標註、流體路徑、間隙細節
 
-## 📈 Validation & Testing
+### 分析特色
+- **壓力分析**: 梯度場、壓力係數、損失計算
+- **湍流分析**: 渦流識別、湍流動能、耗散率
+- **無量綱數**: 關鍵流動參數時序追蹤
+- **邊界層**: 壁面效應、分離點、剪應力分佈
 
-### Benchmark Results
-Our implementation has been validated against:
-- ✅ Standard CFD benchmarks (cavity flow, channel flow)
-- ✅ Experimental coffee brewing data
-- ✅ Literature values for porous media flow
-- ✅ Particle settling experiments
+## 📈 驗證與測試
 
-### Continuous Integration
-- Automated testing on multiple Python versions
-- Performance regression detection
-- Code quality checks (flake8, mypy)
-- Coverage reporting (85%+ target)
+### 基準測試結果
+我們的實現已通過以下驗證：
+- ✅ 標準CFD基準測試 (空腔流、管道流)
+- ✅ 實驗咖啡沖煮數據
+- ✅ 多孔介質流動文獻值
+- ✅ 顆粒沉降實驗
 
-## 🎛️ Configuration
+### 持續集成
+- 多Python版本自動測試
+- 性能回歸檢測
+- 代碼品質檢查 (flake8, mypy)
+- 覆蓋率報告 (85%+ 目標)
 
-Key parameters in `config.py`:
+## 🎛️ 配置設定
+
+`config.py` 關鍵參數：
 
 ```python
-# Grid resolution (balance accuracy vs performance)
+# 網格解析度 (平衡精度與性能)
 NX = NY = NZ = 224
 
-# Physical parameters
-POUR_RATE_ML_S = 4.0        # Pour rate (ml/s)
-COFFEE_MASS_G = 20          # Coffee amount (grams)
-BREWING_TIME_SECONDS = 140  # Total brew time
+# 物理參數
+POUR_RATE_ML_S = 4.0        # 注水速度 (ml/s)
+COFFEE_MASS_G = 20          # 咖啡量 (克)
+BREWING_TIME_SECONDS = 140  # 總沖煮時間
 
-# Numerical stability (pre-calibrated)
-CFL_NUMBER = 0.010          # Courant number
-TAU_WATER = 0.800           # Relaxation time
+# 數值穩定性 (預校準)
+CFL_NUMBER = 0.010          # Courant數
+TAU_WATER = 0.800           # 鬆弛時間
 ```
 
-## 📚 Documentation
+## 📚 技術文檔
 
-### Technical Papers
-- [Main Technical Paper](docs/technical/technical_paper.md) - Comprehensive research paper
-- [Mathematical Models](docs/mathematical/mathematical_models.md) - Complete equation derivations
-- [Physics Modeling](docs/physics/physics_modeling.md) - Physical phenomena details
+### 技術論文
+- [主要技術論文](docs/technical/technical_paper.md) - 完整研究論文
+- [數學模型](docs/mathematical/mathematical_models.md) - 完整方程推導
+- [物理建模](docs/physics/physics_modeling.md) - 物理現象細節
 
-### Performance Analysis
-- [Performance Report](docs/performance/performance_analysis.md) - Detailed benchmarking
-- [Validation Results](docs/validation/validation_testing.md) - Experimental verification
+### 性能分析
+- [性能報告](docs/performance/performance_analysis.md) - 詳細基準測試
+- [驗證結果](docs/validation/validation_testing.md) - 實驗驗證
 
-### User Guides
-- [Quick Start Guide](docs/tutorials/quick_start.md) - Get running in 5 minutes
-- [Advanced Usage](docs/tutorials/advanced_usage.md) - Parameter tuning and optimization
+### 用戶指南
+- [快速入門](docs/tutorials/quick_start.md) - 5分鐘上手
+- [進階使用](docs/tutorials/advanced_usage.md) - 參數調校優化
 
-## 🏆 Project Achievements
+## 🏆 專案成就
 
-### Technical Excellence
-- **S-Grade Code Quality** (100/100 score)
-- **Industrial Stability** (100% numerical convergence)
-- **Research Performance** (159M+ points/second)
-- **Enterprise Testing** (85%+ coverage)
-- **🆕 CFD Professional Analysis** (7 specialized analysis types)
-- **🆕 Automated Report Generation** (Smart timestamped directory management)
+### 技術卓越
+- **S級代碼品質** (100/100分)
+- **工業級穩定性** (100% 數值收斂)
+- **研究級性能** (159M+ 格點/秒)
+- **企業級測試** (85%+ 覆蓋率)
+- **🆕 CFD專業分析** (7種專業分析類型)
+- **🆕 自動報告生成** (智能時間戳目錄管理)
 
-### Academic Impact
-- **53,000+ words** of technical documentation
-- **255+ mathematical equations** with full derivations
-- **Journal-ready research papers** with peer-review standards
-- **Open-source CFD education** resource
-- **🆕 Professional CFD Visualization** (Research-grade analysis charts)
+### 學術影響
+- **53,000+字** 技術文檔
+- **255+數學方程式** 完整推導
+- **期刊級研究論文** 同行評議標準
+- **開源CFD教育** 資源
+- **🆕 專業CFD視覺化** (研究級分析圖表)
 
-### Engineering Quality
-- Complete CI/CD pipeline with GitHub Actions
-- Professional documentation with academic standards
-- Comprehensive test suite with performance benchmarks
-- Production-grade error handling and diagnostics
-- **🆕 Enterprise Report Management** (Automated professional output)
+### 工程品質
+- 完整CI/CD流水線與GitHub Actions
+- 學術標準專業文檔
+- 全面測試套件與性能基準
+- 生產級錯誤處理與診斷
+- **🆕 企業級報告管理** (自動專業輸出)
 
-## 🤝 Contributing
+## 🤝 貢獻指南
 
-We welcome contributions! Please see:
-- [Contributing Guidelines](CONTRIBUTING.md)
-- [Development Setup](docs/tutorials/development.md)
-- [Code Style Guide](docs/technical/coding_standards.md)
+歡迎參與貢獻！請參考：
+- [貢獻指南](CONTRIBUTING.md)
+- [開發環境設置](docs/tutorials/development.md)
+- [代碼風格指南](docs/technical/coding_standards.md)
 
-## 📄 Citation
+## 📄 引用方式
 
-If you use this work in research, please cite:
+如在研究中使用本專案，請引用：
 
 ```bibtex
 @software{pourover_cfd_2025,
-  title={Three-Dimensional Lattice Boltzmann Simulation of Pour-Over Coffee Brewing},
+  title={三維格子玻爾茲曼手沖咖啡沖煮模擬系統},
   author={Pour-Over CFD Team},
   year={2025},
   url={https://github.com/yourusername/pour-over-cfd},
-  note={Developed with opencode and GitHub Copilot}
+  note={使用 opencode 和 GitHub Copilot 開發}
 }
 ```
 
-## 📝 License
+## 📝 授權條款
 
-MIT License - see [LICENSE](LICENSE) file for details.
+MIT License - 詳見 [LICENSE](LICENSE) 檔案
 
-## 🔗 Related Work
+## 🔗 相關專案
 
-- [Taichi Framework](https://github.com/taichi-dev/taichi) - GPU acceleration
-- [OpenFOAM](https://openfoam.org/) - Traditional CFD comparison
-- [LBM Literature](docs/references/) - Academic background
+- [Taichi Framework](https://github.com/taichi-dev/taichi) - GPU加速框架
+- [OpenFOAM](https://openfoam.org/) - 傳統CFD對比
+- [LBM Literature](docs/references/) - 學術背景資料
 
 ---
 
-**"Great coffee comes from understanding the physics of brewing"** ☕
+**"偉大的咖啡來自對沖煮物理的深入理解"** ☕
 
-*Professional CFD simulation system achieving S-grade quality standards through AI-assisted development*
+*通過AI輔助開發實現S級品質標準的專業CFD模擬系統*

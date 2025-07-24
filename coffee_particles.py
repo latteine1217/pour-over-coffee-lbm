@@ -689,6 +689,18 @@ class CoffeeParticleSystem:
                 # 清零力（為下一步準備）
                 self.force[i] = ti.Vector([0.0, 0.0, 0.0])
     
+    def update_particles(self, dt: float):
+        """公共接口：更新顆粒系統 - 用於基準測試"""
+        # V60幾何參數 (格子單位)
+        center_x = config.NX // 2
+        center_y = config.NY // 2
+        bottom_z = config.NZ // 4
+        bottom_radius_lu = config.BOTTOM_RADIUS / config.SCALE_LENGTH
+        top_radius_lu = config.TOP_RADIUS / config.SCALE_LENGTH
+        
+        # 調用核心物理更新
+        self.update_particle_physics(dt, center_x, center_y, bottom_z, bottom_radius_lu, top_radius_lu)
+    
     @ti.func
     def check_particle_boundary_violation_safe(self, pos, center_x: ti.f32, center_y: ti.f32,
                                              bottom_z: ti.f32, bottom_radius_lu: ti.f32, 

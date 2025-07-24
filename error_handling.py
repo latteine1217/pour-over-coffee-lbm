@@ -210,16 +210,14 @@ class GlobalErrorHandler:
         try:
             # 清理GPU記憶體
             import taichi as ti
-            if ti.is_initialized():
-                # 強制垃圾回收
-                import gc
-                gc.collect()
-                
-                # 如果可能，重置Taichi
-                logger.warning("嘗試重置Taichi以釋放GPU記憶體")
-                return True
+            # Taichi初始化狀態檢查已跳過，直接執行記憶體清理
+            # 強制垃圾回收
+            import gc
+            gc.collect()
             
-            return False
+            # 如果可能，重置Taichi
+            logger.warning("嘗試重置Taichi以釋放GPU記憶體")
+            return True
             
         except Exception as e:
             logger.error(f"記憶體恢復失敗: {e}")
@@ -232,7 +230,7 @@ class GlobalErrorHandler:
         try:
             # 嘗試重新初始化GPU
             import taichi as ti
-            if ti.is_initialized():
+            # 跳過初始化狀態檢查，直接執行GPU恢復
                 logger.warning("檢測到GPU錯誤，建議檢查GPU狀態")
                 # 在實際應用中，這裡可以嘗試切換到CPU後端
                 return False  # GPU錯誤通常需要人工干預

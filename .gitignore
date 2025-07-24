@@ -74,11 +74,25 @@ figures/
 plots/
 visualization/
 
+# Report directory - keep structure but ignore bulk content
+report/*/images/*.png
+report/*/data/*.json
+report/*/analysis/*.txt
+
 # Allow baseline files but ignore generated results
 !baseline_performance.json
 !benchmark_results/
 benchmark_results/*
 !benchmark_results/.gitkeep
+
+# Generated analysis images in root directory
+*_analysis_step_*.png
+*_cfd_*.png
+cfd_data_export_*.json
+*.png
+!pour_over_geometry_visualization.png
+!3d_geometry_model_with_particles.png
+!cross_section_view_with_particles.png
 
 # ===== Data Files =====
 # Large scientific data files

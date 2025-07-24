@@ -71,7 +71,7 @@ class PrecisePouringSystem:
     @ti.kernel
     def apply_pouring(self, lbm_u: ti.template(), lbm_rho: ti.template(), 
                      multiphase_phi: ti.template(), dt: ti.f32):
-        """施加精確注水到LBM場"""
+        """施加精確注水到LBM場 - 向量速度場版本"""
         if self.pouring_active[None] == 1:
             # 更新注水時間
             self.pour_time[None] += dt
@@ -119,6 +119,61 @@ class PrecisePouringSystem:
                         radial_vy = radial_factor * dy / distance_to_pour
                     
                     lbm_u[i, j, k] = ti.Vector([radial_vx, radial_vy, vertical_velocity])
+    
+    @ti.kernel
+    def apply_pouring_soa(self, lbm_ux: ti.template(), lbm_uy: ti.template(), lbm_uz: ti.template(), 
+                         lbm_rho: ti.template(), multiphase_phi: ti.template(), dt: ti.f32):
+        """施加精確注水到LBM場 - SoA版本，直接操作分離的速度分量"""
+        if self.pouring_active[None] == 1:
+            # 更新注水時間
+            self.pour_time[None] += dt
+            
+            # 計算當前注水位置
+            pour_x, pour_y = self._get_current_pour_position()
+            
+            # 注水影響區域
+            pour_radius = self.POUR_DIAMETER_GRID / 2.0
+            pour_z = self.POUR_HEIGHT
+            
+            # 在注水區域施加水流
+            for i, j, k in ti.ndrange(config.NX, config.NY, config.NZ):
+                # 計算到注水中心的距離
+                dx = i - pour_x
+                dy = j - pour_y
+                distance_to_pour = ti.sqrt(dx*dx + dy*dy)
+                
+                # 只在水流噴嘴附近的小範圍內施加影響 (3-4格的垂直範圍)
+                pour_stream_height = 4.0  # 水流噴嘴影響的垂直高度
+                if distance_to_pour <= pour_radius and k >= pour_z and k <= pour_z + pour_stream_height:
+                    # 高斯分佈的水流強度 (中心最強)
+                    intensity = ti.exp(-0.5 * (distance_to_pour / pour_radius)**2)
+                    
+                    # 垂直距離衰減 (離噴嘴越遠強度越低)
+                    vertical_distance = k - pour_z
+                    vertical_decay = ti.exp(-vertical_distance / 2.0)
+                    total_intensity = intensity * vertical_decay
+                    
+                    # 設置水相 (phi = 1 表示純水)
+                    multiphase_phi[i, j, k] = 1.0
+                    
+                    # 設置密度為水密度
+                    lbm_rho[i, j, k] = config.RHO_WATER
+                    
+                    # 設置垂直向下的水流速度
+                    vertical_velocity = -self.POUR_VELOCITY * total_intensity * self.pour_flow_rate[None]
+                    
+                    # 添加輕微的徑向分散 (更真實)
+                    radial_vx = 0.0
+                    radial_vy = 0.0
+                    if distance_to_pour > 0:
+                        radial_factor = 0.1 * total_intensity  # 徑向分散強度
+                        radial_vx = radial_factor * dx / distance_to_pour
+                        radial_vy = radial_factor * dy / distance_to_pour
+                    
+                    # 直接設置SoA速度分量
+                    lbm_ux[i, j, k] = radial_vx
+                    lbm_uy[i, j, k] = radial_vy
+                    lbm_uz[i, j, k] = vertical_velocity
     
     @ti.func
     def _get_current_pour_position(self):
