@@ -6,12 +6,17 @@
 開發：opencode + GitHub Copilot
 """
 
+# 設置Python路徑以便導入模組
+import sys
+import os
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "")))
+
 import unittest
 import numpy as np
 import taichi as ti
-import config
-from multiphase_3d import MultiphaseFlow3D
-from lbm_solver import LBMSolver
+import config.config as config
+from src.core.multiphase_3d import MultiphaseFlow3D
+from src.core.lbm_solver import LBMSolver
 
 class TestMultiphaseFlow(unittest.TestCase):
     """多相流系統測試"""

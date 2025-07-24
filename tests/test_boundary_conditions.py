@@ -4,12 +4,17 @@ boundary_conditions.py 測試套件
 測試邊界條件管理系統的完整功能
 """
 
+# 設置Python路徑以便導入模組
+import sys
+import os
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "")))
+
 import pytest
 import numpy as np
 import taichi as ti
-import config
-from boundary_conditions import BoundaryConditionManager
-from lbm_solver import LBMSolver
+import config.config as config
+from src.physics.boundary_conditions import BoundaryConditionManager
+from src.core.lbm_solver import LBMSolver
 
 # 設置測試環境
 @pytest.fixture(scope="module", autouse=True)

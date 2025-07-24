@@ -4,11 +4,16 @@ les_turbulence.py 測試套件
 測試LES湍流建模系統的功能
 """
 
+# 設置Python路徑以便導入模組
+import sys
+import os
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "")))
+
 import pytest
 import numpy as np
 import taichi as ti
-import config
-from les_turbulence import LESTurbulenceModel
+import config.config as config
+from src.physics.les_turbulence import LESTurbulenceModel
 
 # 設置測試環境
 @pytest.fixture(scope="module", autouse=True)  

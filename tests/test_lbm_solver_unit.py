@@ -6,13 +6,18 @@ LBM求解器單元測試
 開發：opencode + GitHub Copilot
 """
 
+# 設置Python路徑以便導入模組
+import sys
+import os
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "")))
+
 import unittest
 import numpy as np
 import taichi as ti
-import config
-from lbm_solver import LBMSolver
-from boundary_conditions import BoundaryConditionManager
-from numerical_stability import NumericalStabilityMonitor
+import config.config as config
+from src.core.lbm_solver import LBMSolver
+from src.physics.boundary_conditions import BoundaryConditionManager
+from src.core.numerical_stability import NumericalStabilityMonitor
 
 @ti.data_oriented
 class TestLBMSolver(unittest.TestCase):

@@ -3,6 +3,10 @@
 測試Enhanced Visualizer的報告輸出功能
 """
 
+# 設置Python路徑以便導入模組
+import sys
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "")))
+
 import os
 import numpy as np
 from datetime import datetime

@@ -4,15 +4,19 @@
 快速驗證各種驅動模式的數值穩定性
 """
 
+# 設置Python路徑以便導入模組
+import os
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "")))
+
 import sys
 import numpy as np
 import time
 
 # 引入模組
-from init import initialize_taichi_once
+from config.init import initialize_taichi_once
 initialize_taichi_once()
 
-import config
+import config.config as config
 
 def test_pressure_mode(mode, steps=50):
     """測試特定壓力驅動模式"""

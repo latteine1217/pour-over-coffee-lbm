@@ -10,13 +10,13 @@ import sys
 import time
 
 # 導入核心模組
-from init import initialize_taichi_once
-import config
-from lbm_solver import LBMSolver
-from multiphase_3d import MultiphaseFlow3D
-from coffee_particles import CoffeeParticleSystem
-from precise_pouring import PrecisePouringSystem
-from filter_paper import FilterPaperSystem
+from config.init import initialize_taichi_once
+import config.config as config
+from src.core.lbm_solver import LBMSolver
+from src.core.multiphase_3d import MultiphaseFlow3D
+from src.physics.coffee_particles import CoffeeParticleSystem
+from src.physics.precise_pouring import PrecisePouringSystem
+from src.physics.filter_paper import FilterPaperSystem
 
 class SimpleCoffeeSimulation:
     def __init__(self):

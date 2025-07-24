@@ -4,6 +4,9 @@ LBM診斷系統測試腳本
 測試診斷功能的正確性和效率影響
 """
 
+# 設置Python路徑以便導入模組
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "")))
+
 import time
 import numpy as np
 import sys
@@ -12,7 +15,7 @@ import os
 # 導入必要的模組
 sys.path.append('.')
 from main import CoffeeSimulation
-import config
+import config.config as config
 
 def test_diagnostics_functionality():
     """測試診斷系統功能完整性"""

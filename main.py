@@ -16,17 +16,17 @@ import numpy as np
 import taichi as ti
 
 # 本地模組導入
-import config
-from init import initialize_taichi_once
-from ultra_optimized_lbm import UltraOptimizedLBMSolver
-from multiphase_3d import MultiphaseFlow3D
-from coffee_particles import CoffeeParticleSystem
-from precise_pouring import PrecisePouringSystem
-from filter_paper import FilterPaperSystem
-from pressure_gradient_drive import PressureGradientDrive
-from visualizer import UnifiedVisualizer
-from enhanced_visualizer import EnhancedVisualizer
-from lbm_diagnostics import LBMDiagnostics
+import config.config as config
+from config.init import initialize_taichi_once
+from src.core.ultra_optimized_lbm import UltraOptimizedLBMSolver
+from src.core.multiphase_3d import MultiphaseFlow3D
+from src.physics.coffee_particles import CoffeeParticleSystem
+from src.physics.precise_pouring import PrecisePouringSystem
+from src.physics.filter_paper import FilterPaperSystem
+from src.physics.pressure_gradient_drive import PressureGradientDrive
+from src.visualization.visualizer import UnifiedVisualizer
+from src.visualization.enhanced_visualizer import EnhancedVisualizer
+from src.visualization.lbm_diagnostics import LBMDiagnostics
 
 # 確保Taichi已正確初始化
 initialize_taichi_once()
@@ -937,7 +937,7 @@ def run_debug_simulation(max_steps=250, pressure_mode="none"):
     
     # Apple Silicon 優化狀態
     try:
-        from apple_silicon_optimizations import apple_optimizer
+        from src.core.apple_silicon_optimizations import apple_optimizer
         chip_info = apple_optimizer.device_info
         if chip_info['chip'] != 'Unknown':
             print(f"🍎 Apple Silicon: {chip_info['chip']} ({chip_info['memory_gb']}GB)")
