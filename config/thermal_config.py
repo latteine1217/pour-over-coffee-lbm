@@ -16,7 +16,7 @@
 
 import math
 import numpy as np
-from config import (
+from config.config import (
     NX, NY, NZ, DX, DT, SCALE_LENGTH, SCALE_TIME,
     WATER_TEMP_C, WATER_DENSITY_90C, COFFEE_POWDER_MASS,
     CUP_HEIGHT, TOP_RADIUS, BOTTOM_RADIUS, PHYSICAL_DOMAIN_SIZE

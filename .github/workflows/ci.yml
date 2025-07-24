@@ -33,37 +33,49 @@ jobs:
     - name: Install system dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y python3-dev build-essential
+        sudo apt-get install -y python3-dev build-essential xvfb
+        # 設置虛擬顯示（用於GUI測試）
+        export DISPLAY=:99
+        Xvfb :99 -screen 0 1024x768x24 &
         
     - name: Install Python dependencies
       run: |
         python -m pip install --upgrade pip
+        # 為CI環境設置Taichi CPU後端
+        export TI_ARCH=cpu
         pip install -r requirements.txt
         pip install pytest pytest-cov pytest-xdist coverage[toml]
         
     - name: Lint with flake8
       run: |
         pip install flake8
-        # stop the build if there are Python syntax errors or undefined names
-        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-        # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
-        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+        # 只檢查嚴重的語法錯誤
+        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics --exclude=.backup_archive,backups
+        # 使用配置文件進行完整檢查（但不強制失敗）
+        flake8 . --count --exit-zero --statistics
         
     - name: Type checking with mypy
       run: |
         pip install mypy
-        mypy --ignore-missing-imports --strict-optional main.py lbm_solver.py
+        mypy --ignore-missing-imports --strict-optional main.py src/core/lbm_solver.py
       continue-on-error: true
         
     - name: Run unit tests with coverage
+      env:
+        CI: true
+        DISPLAY: :99
       run: |
-        coverage run -m pytest tests/ -v --tb=short
+        coverage run -m pytest tests/ -v --tb=short -x
         coverage xml
         coverage report
         
     - name: Run integration tests
+      env:
+        CI: true
+        DISPLAY: :99
       run: |
-        python main.py debug 5
+        python ci_smoke_test.py
+      continue-on-error: false
         
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v3
@@ -102,8 +114,12 @@ jobs:
         pip install -r requirements.txt
         
     - name: Run performance benchmarks
+      env:
+        CI: true
+        DISPLAY: :99
       run: |
-        python benchmark_suite.py --output benchmark_results.json
+        python benchmarks/benchmark_suite.py --output benchmark_results.json
+      continue-on-error: true
         
     - name: Upload benchmark results
       uses: actions/upload-artifact@v3

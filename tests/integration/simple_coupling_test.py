@@ -13,13 +13,13 @@
 """
 
 # 設置Python路徑以便導入模組
+import sys
 import os
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../")))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../")))
 
 import taichi as ti
 import numpy as np
 import time
-import sys
 
 # 初始化Taichi
 try:
@@ -34,7 +34,7 @@ try:
     from src.core.thermal_fluid_coupled import ThermalFluidCoupledSolver, CouplingConfig
     from src.physics.thermal_lbm import ThermalLBM
     from src.core.lbm_solver import LBMSolver
-    import config
+    import config.config as config
     print("✅ 所有模組導入成功")
 except ImportError as e:
     print(f"❌ 模組導入失敗: {e}")

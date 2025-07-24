@@ -15,6 +15,7 @@
 - 📊 **即時3D視覺化** - 專業級CFD分析圖表
 - 🆕 **CFD工程師級分析** - 7種專業分析模式
 - 🆕 **智能報告管理** - 時間戳自動目錄結構
+- 🌡️ **熱流耦合系統** - 溫度-流動耦合模擬 (新功能)
 
 ## 🚀 快速開始
 
@@ -32,11 +33,21 @@ pip install -r requirements.txt
 
 ### 執行模擬
 ```bash
+# 基礎LBM模擬
 python main.py                # 完整模擬 (~10分鐘)
 python main.py debug 10       # 快速測試含CFD報告 (推薦首次)
 python main.py debug 5        # 超快速預覽 (5步驟)
+
+# 🌡️ 熱耦合模擬 (新功能)
+python main.py debug 10 none thermal          # 熱流耦合模式 
+python main.py debug 10 none strong_coupled   # Phase 3強耦合模式
+python main.py thermal thermal 10             # 專門熱耦合測試
+
+# 高性能引擎
 python working_main.py         # 輕量版本測試
 python jax_hybrid_core.py      # 高性能JAX引擎測試
+
+# 專業視覺化
 python examples/conservative_coupling_demo.py # 驗證V60幾何模型
 ```
 
@@ -51,6 +62,7 @@ python examples/conservative_coupling_demo.py # 驗證V60幾何模型
 | **測試覆蓋率** | 85%+ | ✅ 企業級標準 |
 | **🆕 CFD分析功能** | 7種專業分析類型 | ✅ 研究級 |
 | **🆕 報告生成** | 自動時間戳報告 | ✅ 專業工作流 |
+| **🌡️ 熱耦合系統** | 溫度-流動耦合模擬 | ✅ 新功能 |
 
 ## 🏗️ 系統架構
 
@@ -67,6 +79,7 @@ pour-over/
 │   │   ├── lbm_solver.py          # D3Q19 LBM求解器
 │   │   ├── multiphase_3d.py       # 3D多相流動系統  
 │   │   ├── strong_coupled_solver.py # Phase 3強耦合求解器
+│   │   ├── thermal_fluid_coupled.py # 🌡️ 熱流耦合系統 (新功能)
 │   │   └── ultra_optimized_lbm.py # 極致優化LBM核心
 │   ├── physics/                   # 🔬 物理模型
 │   │   ├── coffee_particles.py   # 拉格朗日顆粒追蹤
@@ -106,6 +119,7 @@ pour-over/
 - **`src/core/lbm_solver.py`** - D3Q19格子玻爾茲曼求解器
 - **`src/core/multiphase_3d.py`** - 水-空氣界面動力學
 - **`src/core/strong_coupled_solver.py`** - Phase 3強耦合系統
+- **`src/core/thermal_fluid_coupled.py`** - 🌡️ 熱流耦合系統 (新功能)
 - **`src/physics/coffee_particles.py`** - 拉格朗日顆粒追蹤
 - **`src/physics/boundary_conditions.py`** - V60幾何邊界處理
 
@@ -140,6 +154,7 @@ pour-over/
 - **多相流動** - 表面張力效應
 - **多孔介質流** - 咖啡床滲透
 - **顆粒-流體耦合** - 咖啡顆粒互動
+- **🌡️ 熱流耦合** - 溫度場與流場耦合 (新功能)
 
 ### 🆕 CFD工程師級分析
 - **壓力場分析**: 全面壓力梯度與損失分析
@@ -201,6 +216,8 @@ report/YYYYMMDD_HHMMSS/
 - ✅ 實驗咖啡沖煮數據
 - ✅ 多孔介質流動文獻值
 - ✅ 顆粒沉降實驗
+- ✅ 🌡️ 熱耦合系統測試 (85%+通過率)
+- ✅ Phase 3強耦合測試套件
 
 ### 持續集成
 - 多Python版本自動測試
@@ -209,6 +226,23 @@ report/YYYYMMDD_HHMMSS/
 - 覆蓋率報告 (85%+ 目標)
 
 ## 🎛️ 配置設定
+
+### 🌡️ 模擬模式選擇 (新功能)
+```bash
+# 基礎LBM模式 (穩定高效)
+python main.py debug 10 none basic
+
+# 熱流耦合模式 (溫度-流動耦合) 
+python main.py debug 10 none thermal
+
+# Phase 3強耦合模式 (最高級物理建模)
+python main.py debug 10 none strong_coupled
+
+# 專門熱耦合測試
+python main.py thermal thermal 10
+```
+
+### 核心參數配置
 
 `config.py` 關鍵參數：
 
@@ -224,6 +258,21 @@ BREWING_TIME_SECONDS = 140  # 總沖煮時間
 # 數值穩定性 (預校準)
 CFL_NUMBER = 0.010          # Courant數
 TAU_WATER = 0.800           # 鬆弛時間
+```
+
+### 🌡️ 熱流參數配置
+
+`config/thermal_config.py` 新增參數：
+
+```python
+# 熱物性參數
+INITIAL_TEMPERATURE = 95.0  # 初始水溫 (°C)
+AMBIENT_TEMPERATURE = 25.0  # 環境溫度 (°C)
+THERMAL_DIFFUSIVITY = 1.4e-7 # 熱擴散係數 (m²/s)
+
+# 熱邊界條件
+TEMPERATURE_INLET = 95.0    # 進口溫度 (°C)
+HEAT_LOSS_COEFFICIENT = 5.0 # 散熱係數 (W/m²K)
 ```
 
 ## 📚 技術文檔
@@ -261,6 +310,7 @@ TAU_WATER = 0.800           # 鬆弛時間
 - **期刊級研究論文** 同行評議標準
 - **開源CFD教育** 資源
 - **🆕 專業CFD視覺化** (研究級分析圖表)
+- **🌡️ 熱流耦合系統** (溫度-流動完整建模)
 
 ### 工程品質
 - 完整CI/CD流水線與GitHub Actions

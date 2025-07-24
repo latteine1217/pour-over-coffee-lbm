@@ -1,0 +1,24 @@
+[flake8]
+max-line-length = 100
+max-complexity = 12
+ignore = 
+    E203, # whitespace before ':'
+    E501, # line too long (handled by black)
+    W503, # line break before binary operator
+    F401, # imported but unused (common in __init__.py)
+    E402, # module level import not at top of file (needed for Taichi)
+exclude =
+    .git,
+    __pycache__,
+    build,
+    dist,
+    *.egg-info,
+    .backup_archive,
+    backups,
+    venv,
+    env
+
+per-file-ignores =
+    __init__.py:F401
+    config/*.py:E402
+    */test_*.py:F401,E402

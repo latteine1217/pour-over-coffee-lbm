@@ -20,13 +20,13 @@ Phase 3 強耦合系統完整測試套件
 """
 
 # 設置Python路徑以便導入模組
+import sys
 import os
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../")))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../")))
 
 import taichi as ti
 import numpy as np
 import time
-import sys
 from typing import Dict, List, Tuple, Any
 
 # 設置測試環境
@@ -37,7 +37,7 @@ try:
     from src.core.strong_coupled_solver import StrongCoupledSolver, StrongCouplingConfig, create_coffee_strong_coupling_system
     from src.physics.temperature_dependent_properties import TemperatureDependentProperties, create_water_properties
     from src.physics.buoyancy_natural_convection import BuoyancyNaturalConvection, create_coffee_buoyancy_system
-    import config
+    import config.config as config
     print("✅ 所有Phase 3模組導入成功")
 except ImportError as e:
     print(f"❌ Phase 3模組導入失敗: {e}")

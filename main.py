@@ -19,6 +19,8 @@ import taichi as ti
 import config.config as config
 from config.init import initialize_taichi_once
 from src.core.ultra_optimized_lbm import UltraOptimizedLBMSolver
+from src.core.thermal_fluid_coupled import ThermalFluidCoupledSolver  # 熱耦合求解器
+from src.core.strong_coupled_solver import StrongCoupledSolver  # Phase 3強耦合
 from src.core.multiphase_3d import MultiphaseFlow3D
 from src.physics.coffee_particles import CoffeeParticleSystem
 from src.physics.precise_pouring import PrecisePouringSystem
@@ -306,14 +308,16 @@ class ResultsGenerator:
         print(f"{'='*width}\n")
 
 class CoffeeSimulation:
-    def __init__(self, interactive=False):
+    def __init__(self, interactive=False, thermal_mode="basic"):
         """
-        初始化3D咖啡模擬 - 使用可移動顆粒系統
+        初始化3D咖啡模擬 - 支援熱耦合模式
         interactive: 是否開啟互動模式
+        thermal_mode: 熱耦合模式 ("basic", "thermal", "strong_coupled")
         """
         print("🔄 CoffeeSimulation初始化開始...")
         
         self.interactive = interactive
+        self.thermal_mode = thermal_mode
         self.step_count = 0
         
         print("🔄 創建SimulationDisplay...")
@@ -328,10 +332,11 @@ class CoffeeSimulation:
         self.display.show_header()
         
         # 初始化核心模組
-        print("🔧 系統初始化中...")
+        print(f"🔧 系統初始化中 (模式: {thermal_mode})...")
         
-        print("🔄 初始化UltraOptimizedLBMSolver...")
-        self.lbm = UltraOptimizedLBMSolver()
+        # 根據模式選擇求解器
+        print(f"🔄 初始化LBM求解器 ({thermal_mode})...")
+        self._initialize_solver()
         
         print("🔄 初始化CoffeeParticleSystem...")
         self.particle_system = CoffeeParticleSystem(max_particles=15000)
@@ -390,9 +395,25 @@ class CoffeeSimulation:
         # 創建相容性向量速度場
         self._create_compatibility_velocity_field()
         
-        print(f"\n✅ 模擬系統就緒 (超級優化版)")
+        solver_type = "基礎LBM" if thermal_mode == "basic" else "熱耦合" if thermal_mode == "thermal" else "Phase 3強耦合"
+        print(f"\n✅ 模擬系統就緒 ({solver_type})")
         print(f"   └─ {config.NX}×{config.NY}×{config.NZ} 網格，{created_particles:,} 咖啡顆粒")
-        print(f"   └─ SoA記憶體布局，預期性能提升 25-40%")
+        print(f"   └─ 模式: {thermal_mode}")
+    
+    def _initialize_solver(self):
+        """根據模式初始化適當的求解器"""
+        if self.thermal_mode == "basic":
+            self.lbm = UltraOptimizedLBMSolver()
+            print("   └─ 使用基礎LBM求解器")
+        elif self.thermal_mode == "thermal":
+            self.lbm = ThermalFluidCoupledSolver()
+            print("   └─ 使用熱流耦合求解器")
+        elif self.thermal_mode == "strong_coupled":
+            self.lbm = StrongCoupledSolver()
+            print("   └─ 使用Phase 3強耦合求解器")
+        else:
+            print(f"   ⚠️  未知模式 {self.thermal_mode}，使用基礎LBM")
+            self.lbm = UltraOptimizedLBMSolver()
     
     
     def _initialize_simulation(self):
@@ -913,19 +934,20 @@ class CoffeeSimulation:
         
         return stats
 
-def run_debug_simulation(max_steps=250, pressure_mode="none"):
-    """運行debug模式的模擬 - 優化輸出版本"""
+def run_debug_simulation(max_steps=250, pressure_mode="none", thermal_mode="basic"):
+    """運行debug模式的模擬 - 優化輸出版本，支援熱耦合"""
     print(f"{'='*60}")
     print(f"🔍 DEBUG模式啟動")
     print(f"{'='*60}")
     print(f"🎨 使用科研級enhanced_visualizer")
     print(f"📊 最大步數: {max_steps:,}")
     print(f"💫 壓力模式: {pressure_mode}")
+    print(f"🌡️  熱耦合模式: {thermal_mode}")
     print(f"{'='*60}")
     
-    # 創建模擬實例
+    # 創建模擬實例（支援熱耦合）
     print(f"🔄 正在初始化模擬系統...")
-    sim = CoffeeSimulation()
+    sim = CoffeeSimulation(thermal_mode=thermal_mode)
     
     # 設置壓力驅動模式
     setup_pressure_drive(sim, pressure_mode)
@@ -954,6 +976,13 @@ def run_debug_simulation(max_steps=250, pressure_mode="none"):
         systems_status.append(f"科研視覺化: ✅")
     if hasattr(sim, 'pressure_drive'):
         systems_status.append(f"壓力驅動: ✅")
+    
+    # 熱耦合狀態檢查
+    if thermal_mode != "basic":
+        if hasattr(sim.lbm, 'get_temperature_field'):
+            systems_status.append(f"溫度場: ✅")
+        if hasattr(sim.lbm, 'thermal_coupling_step'):
+            systems_status.append(f"熱耦合: ✅")
     
     print(f"🔧 系統狀態: {' | '.join(systems_status)}")
     
@@ -993,6 +1022,18 @@ def run_debug_simulation(max_steps=250, pressure_mode="none"):
             print(f"\n💫 壓力梯度統計:")
             for key, value in pressure_stats.items():
                 print(f"   ├─ {key}: {value:.6f}")
+        
+        # 熱耦合統計（如果啟用）
+        if thermal_mode != "basic" and hasattr(sim.lbm, 'get_temperature_field'):
+            print(f"\n🌡️  熱耦合統計:")
+            try:
+                temp_field = sim.lbm.get_temperature_field()
+                if temp_field is not None:
+                    temp_data = temp_field.to_numpy()
+                    print(f"   ├─ 溫度範圍: {temp_data.min():.1f} - {temp_data.max():.1f}°C")
+                    print(f"   └─ 平均溫度: {temp_data.mean():.1f}°C")
+            except Exception as e:
+                print(f"   ⚠️  溫度統計獲取失敗: {e}")
                 
         print(f"📊 所有輸出為高質量科研級PNG格式")
     else:
@@ -1084,19 +1125,21 @@ def run_pressure_test(pressure_mode="density", max_steps=100):
 
 
 def main():
-    """主函數 - 新的用戶界面"""
+    """主函數 - 新的用戶界面，支援熱耦合模式"""
     import sys
     
     print("🚀 進入main函數")
     
     if len(sys.argv) > 1 and sys.argv[1] == "debug":
-        # Debug模式：python main.py debug [步數] [壓力驅動模式]
+        # Debug模式：python main.py debug [步數] [壓力驅動模式] [熱耦合模式]
         max_steps = int(sys.argv[2]) if len(sys.argv) > 2 else 250
         pressure_mode = sys.argv[3] if len(sys.argv) > 3 else "none"
+        thermal_mode = sys.argv[4] if len(sys.argv) > 4 else "basic"
         print(f"🔍 Debug模式 - 最大步數: {max_steps:,}")
         print(f"💫 壓力驅動模式: {pressure_mode}")
+        print(f"🌡️  熱耦合模式: {thermal_mode}")
         print("🔄 準備運行debug模擬...")
-        sim = run_debug_simulation(max_steps=max_steps, pressure_mode=pressure_mode)
+        sim = run_debug_simulation(max_steps=max_steps, pressure_mode=pressure_mode, thermal_mode=thermal_mode)
         print("✅ Debug模擬完成")
     elif len(sys.argv) > 1 and sys.argv[1] == "pressure":
         # 壓力梯度測試模式：python main.py pressure [模式] [步數]
@@ -1107,19 +1150,41 @@ def main():
         print(f"   └─ 測試步數: {max_steps:,}")
         sim = run_pressure_test(pressure_mode=pressure_mode, max_steps=max_steps)
         print("✅ 壓力梯度測試完成")
+    elif len(sys.argv) > 1 and sys.argv[1] == "thermal":
+        # 熱耦合測試模式：python main.py thermal [模式] [步數]
+        thermal_mode = sys.argv[2] if len(sys.argv) > 2 else "thermal"
+        max_steps = int(sys.argv[3]) if len(sys.argv) > 3 else 100
+        print(f"🌡️  熱耦合測試模式")
+        print(f"   ├─ 耦合模式: {thermal_mode}")
+        print(f"   └─ 測試步數: {max_steps:,}")
+        sim = run_debug_simulation(max_steps=max_steps, pressure_mode="none", thermal_mode=thermal_mode)
+        print("✅ 熱耦合測試完成")
     else:
         # 正常模式運行
         print("☕ 手沖咖啡3D模擬系統")
         print("💡 使用說明:")
-        print("   🔍 python main.py debug [步數] [壓力模式] - 調試模式")
+        print("   🔍 python main.py debug [步數] [壓力模式] [熱耦合模式] - 調試模式")
         print("   💫 python main.py pressure [模式] [步數] - 壓力梯度測試")
-        print("       模式選項: density, force, mixed, none")
+        print("   🌡️  python main.py thermal [模式] [步數] - 熱耦合測試")
+        print("       壓力模式: density, force, mixed, none")
+        print("       熱耦合模式: basic, thermal, strong_coupled")
         print()
         
         # 詢問用戶偏好
         try:
             interactive = input("是否啟用互動模式? (y/N): ").lower() == 'y'
             save_output = input("是否保存中間結果? (Y/n): ").lower() != 'n'
+            
+            # 詢問熱耦合設定
+            print("\n🌡️  熱耦合模式設定:")
+            print("   1. basic - 基礎LBM (預設)")
+            print("   2. thermal - 熱流耦合")
+            print("   3. strong_coupled - Phase 3強耦合")
+            thermal_choice = input("選擇熱耦合模式 (1-3): ").strip()
+            
+            thermal_modes = {"1": "basic", "2": "thermal", "3": "strong_coupled"}
+            thermal_mode = thermal_modes.get(thermal_choice, "basic")
+            print(f"   └─ 已選擇: {thermal_mode} 模式")
             
             # 詢問壓力驅動設定
             print("\n💫 壓力梯度驅動設定:")
@@ -1138,7 +1203,7 @@ def main():
             return 0
         
         # 創建並運行模擬
-        sim = CoffeeSimulation(interactive=interactive)
+        sim = CoffeeSimulation(interactive=interactive, thermal_mode=thermal_mode)
         
         # 設置壓力驅動模式
         setup_pressure_drive(sim, pressure_mode)

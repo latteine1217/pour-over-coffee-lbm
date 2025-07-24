@@ -52,8 +52,22 @@ class CFDPerformanceBenchmark:
         self.results: List[BenchmarkResult] = []
         self.baseline_data: Optional[Dict] = None
         
-        # 初始化Taichi
-        ti.init(arch=ti.metal, device_memory_GB=8)
+        # 初始化Taichi - 支援CI環境
+        import os
+        forced_cpu = os.environ.get('CI', 'false').lower() == 'true' or os.environ.get('TI_ARCH', '') == 'cpu'
+        
+        if forced_cpu:
+            # CI環境使用CPU
+            ti.init(arch=ti.cpu, cpu_max_num_threads=4, debug=False)
+            print("✓ Benchmark使用CPU計算 (CI環境)")
+        else:
+            # 本地環境優先GPU
+            try:
+                ti.init(arch=ti.metal, device_memory_GB=8)
+                print("✓ Benchmark使用GPU計算")
+            except:
+                ti.init(arch=ti.cpu, cpu_max_num_threads=8, debug=False)
+                print("✓ Benchmark使用CPU計算 (GPU不可用)")
         
         # 基準測試配置
         self.test_configs = {

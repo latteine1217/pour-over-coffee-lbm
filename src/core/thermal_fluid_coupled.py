@@ -352,3 +352,102 @@ class ThermalFluidCoupledSolver:
         }
         
         print("✅ 耦合系統重置完成")
+    
+    # ==========================================
+    # 相容性介面 - 為其他系統提供LBM求解器介面
+    # ==========================================
+    
+    @property
+    def solid(self):
+        """代理到流體求解器的solid字段"""
+        return self.fluid_solver.solid
+    
+    @property
+    def rho(self):
+        """代理到流體求解器的密度字段"""
+        return self.fluid_solver.rho
+    
+    @property
+    def phase(self):
+        """代理到流體求解器的相場字段"""
+        if hasattr(self.fluid_solver, 'phase'):
+            return self.fluid_solver.phase
+        return None
+    
+    @property
+    def u(self):
+        """代理到流體求解器的速度字段"""
+        return self.fluid_solver.u
+    
+    @property
+    def ux(self):
+        """代理到流體求解器的x方向速度"""
+        if hasattr(self.fluid_solver, 'ux'):
+            return self.fluid_solver.ux
+        return None
+    
+    @property
+    def uy(self):
+        """代理到流體求解器的y方向速度"""
+        if hasattr(self.fluid_solver, 'uy'):
+            return self.fluid_solver.uy
+        return None
+    
+    @property 
+    def uz(self):
+        """代理到流體求解器的z方向速度"""
+        if hasattr(self.fluid_solver, 'uz'):
+            return self.fluid_solver.uz
+        return None
+    
+    def has_soa_velocity_layout(self):
+        """檢查是否使用SoA速度布局"""
+        return hasattr(self.fluid_solver, 'has_soa_velocity_layout') and self.fluid_solver.has_soa_velocity_layout()
+    
+    def get_velocity_components(self):
+        """獲取速度分量"""
+        if hasattr(self.fluid_solver, 'get_velocity_components'):
+            return self.fluid_solver.get_velocity_components()
+        return self.ux, self.uy, self.uz
+    
+    def get_velocity_vector_field(self):
+        """獲取向量速度場"""
+        return self.fluid_solver.get_velocity_vector_field()
+    
+    def init_fields(self):
+        """初始化字段 - 代理到流體求解器並自動初始化耦合系統"""
+        # 初始化流體求解器
+        result = self.fluid_solver.init_fields()
+        
+        # 自動初始化耦合系統
+        if not self.is_initialized:
+            fluid_conditions = {
+                'density_initial': 1.0,
+                'velocity_initial': [0.0, 0.0, 0.0]
+            }
+            thermal_conditions = {
+                'temperature_initial': 25.0,  # 室溫 °C
+                'hot_zone_temperature': 90.0  # 注水溫度 °C
+            }
+            self.initialize_system(fluid_conditions, thermal_conditions)
+        
+        return result
+    
+    def reset_solver(self):
+        """重置求解器 - 使用耦合系統的重置方法"""
+        return self.reset_coupling_system()
+    
+    @property
+    def boundary_manager(self):
+        """代理到流體求解器的邊界管理器"""
+        if hasattr(self.fluid_solver, 'boundary_manager'):
+            return self.fluid_solver.boundary_manager
+        return None
+    
+    def get_temperature_field(self):
+        """獲取溫度場 - 熱耦合特有方法"""
+        return self.thermal_solver.temperature if hasattr(self.thermal_solver, 'temperature') else None
+    
+    def thermal_coupling_step(self):
+        """熱耦合步進 - 使用統一的step方法"""
+        return self.step()
