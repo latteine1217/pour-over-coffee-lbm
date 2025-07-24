@@ -25,6 +25,7 @@ from multiphase_3d import MultiphaseFlow3D
 from coffee_particles import CoffeeParticleSystem
 from precise_pouring import PrecisePouringSystem
 from filter_paper import FilterPaperSystem
+from pressure_gradient_drive import PressureGradientDrive
 from visualizer import UnifiedVisualizer
 from enhanced_visualizer import EnhancedVisualizer
 from lbm_diagnostics import LBMDiagnostics
@@ -296,6 +297,9 @@ class CoffeeSimulation:
         print("🔄 初始化FilterPaperSystem...")
         self.filter_paper = FilterPaperSystem(self.lbm)
         
+        print("🔄 初始化PressureGradientDrive...")
+        self.pressure_drive = PressureGradientDrive(self.lbm)
+        
         # 視覺化系統
         self.visualizer = UnifiedVisualizer(
             self.lbm, 
@@ -347,6 +351,8 @@ class CoffeeSimulation:
         # === 階段2：加入多相流 ===
         if self.multiphase:
             self.multiphase.init_phase_field()
+            # 立即同步密度場以確保正確的初始密度分佈
+            self.multiphase.update_density_from_phase()
             
             # 多相流穩定
             for i in range(20):
@@ -373,9 +379,10 @@ class CoffeeSimulation:
                 boundary['bottom_radius_lu'], boundary['top_radius_lu']
             )
         
-        # === 階段5：注水系統啟動 ===
+        # === 階段5：注水系統初始化 (但不立即啟動) ===
+        # 注水將在系統穩定後的第16步開始
         if self.pouring:
-            self.pouring.start_pouring(pattern='center')
+            print("🔧 注水系統已準備，將在第16步啟動")
         
         return created_particles
     
@@ -399,21 +406,18 @@ class CoffeeSimulation:
             dt_coupling = dt_safe
         
         # 延遲啟動注水系統（避免初期數值衝擊）
-        if self.pouring and self.step_count > 15:  # 縮短到15步後開始注水
-            # 使用修正的時間步進行注水
-            self.pouring.apply_pouring(self.lbm.u, self.lbm.rho, 
-                                     self.multiphase.phi, dt_safe)
-            
-            # 延遲同步相場（避免劇烈變化）
-            if self.step_count % 2 == 0:  # 每兩步同步一次
-                self.multiphase.update_density_from_phase()
-        
-        # 添加調試信息
-        if self.step_count == 16:  # 注水剛開始時
+        if self.pouring and self.step_count == 10:  # 改為第10步啟動
+            # 第10步：真正啟動注水
+            self.pouring.start_pouring(pattern='center')
             print(f"\n🚿 注水系統啟動 (步驟 {self.step_count})")
             if hasattr(self.pouring, 'get_pouring_info'):
                 info = self.pouring.get_pouring_info()
                 print(f"   └─ 注水狀態: {info}")
+        elif self.pouring and self.step_count > 10:  # 改為第11步及之後
+            # 第11步及之後：持續注水
+            # 使用修正的時間步進行注水
+            self.pouring.apply_pouring(self.lbm.u, self.lbm.rho, 
+                                     self.multiphase.phi, dt_safe)
         
         
         
@@ -427,8 +431,12 @@ class CoffeeSimulation:
         else:
             self.lbm.step()
         
+        # 💫 壓力梯度驅動系統 (新增)
+        if hasattr(self, 'pressure_drive'):
+            self.pressure_drive.update_drive()
+        
         # === 欠鬆弛流體-顆粒耦合 ===
-        if hasattr(self.lbm, 'u') and hasattr(self.lbm, 'rho') and self.step_count > 10:
+        if hasattr(self.lbm, 'u') and hasattr(self.lbm, 'rho') and self.step_count > 5:  # 從第6步開始啟動
             dt_physical = dt_coupling * config.SCALE_TIME
             
             # 檢查局部速度合理性
@@ -437,16 +445,19 @@ class CoffeeSimulation:
             max_vel = np.max(u_magnitude)
             
             if max_vel < 0.1 and not np.isnan(max_vel) and not np.isinf(max_vel):  # 檢查合理性和有限性
-                # 使用欠鬆弛的流體力
+                # 修復：正確的參數傳遞 - apply_fluid_forces只使用流體向量場
                 self.particle_system.apply_fluid_forces(
-                    self.lbm.u, self.lbm.u, self.lbm.u,
-                    self.lbm.rho, self.lbm.rho,
-                    dt_physical  # 使用減小的時間步
+                    self.lbm.u,           # 流體速度向量場
+                    None,                 # fluid_v (未使用，傳None)
+                    None,                 # fluid_w (未使用，傳None)  
+                    self.lbm.rho,         # 流體密度場
+                    self.lbm.rho,         # 壓力場 (使用密度場代替)
+                    dt_physical           # 物理時間步
                 )
             else:
                 # 速度異常時跳過流體力計算
                 if self.step_count < 100 and (np.isnan(max_vel) or np.isinf(max_vel)):
-                    print(f"⚠️  步驟{self.step_count}: 速度場異常，跳過耦合")
+                    print(f"⚠️  步驟{self.step_count}: 速度場異常 ({max_vel:.2e})，跳過耦合")
         
         # 顆粒物理更新（使用穩定化參數）
         if self.filter_paper:
@@ -465,9 +476,9 @@ class CoffeeSimulation:
         if self.filter_paper and hasattr(self.filter_paper, 'step'):
             self.filter_paper.step(self.particle_system)
         
-        # 多相流處理（使用欠鬆弛）
+        # 多相流處理（使用欠鬆弛）- 傳遞step_count用於啟動延遲
         if self.multiphase:
-            self.multiphase.step()
+            self.multiphase.step(self.step_count)
         
         # === LBM診斷監控系統 ===
         simulation_time = self.step_count * config.DT
@@ -737,7 +748,7 @@ class CoffeeSimulation:
         
         return stats
 
-def run_debug_simulation(max_steps=250):
+def run_debug_simulation(max_steps=250, pressure_mode="none"):
     """運行debug模式的模擬"""
     print("🔍 啟動DEBUG模式模擬")
     print("🎨 使用科研級enhanced_visualizer生成高質量圖片")
@@ -746,6 +757,9 @@ def run_debug_simulation(max_steps=250):
     # 創建模擬實例
     sim = CoffeeSimulation()
     print("✅ 模擬實例創建成功")
+    
+    # 設置壓力驅動模式
+    setup_pressure_drive(sim, pressure_mode)
     
     print("\n🔍 系統診斷:")
     if hasattr(sim, 'pouring') and sim.pouring:
@@ -759,6 +773,10 @@ def run_debug_simulation(max_steps=250):
     if hasattr(sim, 'enhanced_viz'):
         print("   ✅ 科研級視覺化系統: 正常 (用於圖片生成)")
         print("   └─ 支援: 密度場、速度場、組合分析、數據導出")
+    if hasattr(sim, 'pressure_drive'):
+        status = sim.pressure_drive.get_status()
+        print(f"   💫 壓力梯度驅動: 正常 (模式: {pressure_mode})")
+        print(f"   └─ 狀態: 密度驅動={status['density_drive']}, 體力驅動={status['force_drive']}, 混合驅動={status['mixed_drive']}")
     
     print(f"\n🔍 初始統計:")
     initial_stats = sim._get_current_stats()
@@ -779,9 +797,96 @@ def run_debug_simulation(max_steps=250):
             final = final_stats.get(key, 0)
             change = final - initial if isinstance(initial, (int, float)) else "N/A"
             print(f"   └─ {key}: {initial:.4f} → {final:.4f} (變化: {change})")
+            
+        # 顯示壓力統計
+        if hasattr(sim, 'pressure_drive'):
+            pressure_stats = sim.pressure_drive.get_statistics()
+            print(f"\n💫 壓力梯度統計:")
+            for key, value in pressure_stats.items():
+                print(f"   └─ {key}: {value:.6f}")
     else:
         print("\n⚠️  Debug模擬異常結束")
         print("📊 已生成診斷用的科研級分析圖")
+    
+    return sim
+
+def setup_pressure_drive(sim, pressure_mode):
+    """設置壓力梯度驅動模式"""
+    if not hasattr(sim, 'pressure_drive'):
+        print("⚠️  壓力梯度驅動系統未初始化")
+        return
+    
+    print(f"💫 配置壓力梯度驅動: {pressure_mode}")
+    
+    if pressure_mode == "density":
+        sim.pressure_drive.activate_density_drive(True)
+        print("   └─ 啟用密度場調製驅動 (方法A)")
+    elif pressure_mode == "force":
+        sim.pressure_drive.activate_force_drive(True)
+        print("   └─ 啟用體力場增強驅動 (方法B)")
+    elif pressure_mode == "mixed":
+        sim.pressure_drive.activate_mixed_drive(True)
+        print("   └─ 啟用混合驅動 (階段2)")
+    else:  # "none"
+        sim.pressure_drive.activate_density_drive(False)
+        sim.pressure_drive.activate_force_drive(False)
+        sim.pressure_drive.activate_mixed_drive(False)
+        print("   └─ 停用所有壓力梯度驅動，使用純重力")
+
+def run_pressure_test(pressure_mode="density", max_steps=100):
+    """專門的壓力梯度驅動測試函數"""
+    print(f"💫 壓力梯度驅動測試")
+    print(f"   ├─ 模式: {pressure_mode}")
+    print(f"   ├─ 步數: {max_steps}")
+    print(f"   └─ 目標: 測試數值穩定性和流動效果")
+    
+    # 創建測試模擬
+    sim = CoffeeSimulation()
+    
+    # 設置壓力驅動
+    setup_pressure_drive(sim, pressure_mode)
+    
+    # 關閉重力以純粹測試壓力驅動
+    if pressure_mode != "none":
+        print("   🎯 測試模式: 關閉重力，純壓力驅動")
+        # 這裡可以在 config 中暫時設置 GRAVITY_LU = 0
+    
+    # 運行測試
+    print(f"\n🚀 開始{max_steps}步壓力梯度測試...")
+    
+    # 每隔一定步數顯示壓力統計
+    for step in range(1, max_steps + 1):
+        success = sim.step()
+        
+        if not success:
+            print(f"❌ 步驟{step}: 數值不穩定，測試中止")
+            break
+            
+        if step % 20 == 0 or step in [1, 5, 10]:
+            stats = sim._get_current_stats()
+            pressure_stats = sim.pressure_drive.get_statistics()
+            
+            print(f"📊 步驟{step:3d}: 速度={stats['max_velocity']:.6f}, "
+                  f"壓差={pressure_stats['pressure_drop']:.6f}, "
+                  f"密度範圍=[{pressure_stats['min_pressure']:.3f}, {pressure_stats['max_pressure']:.3f}]")
+            
+            # 檢查穩定性
+            if stats['max_velocity'] > 0.1:
+                print(f"⚠️  步驟{step}: 速度過高 {stats['max_velocity']:.6f}")
+            if pressure_stats['pressure_ratio'] > 2.0:
+                print(f"⚠️  步驟{step}: 壓力比過高 {pressure_stats['pressure_ratio']:.3f}")
+    
+    print(f"\n✅ 壓力梯度測試完成")
+    
+    # 最終分析
+    final_stats = sim._get_current_stats()
+    final_pressure = sim.pressure_drive.get_statistics()
+    
+    print(f"\n📊 最終測試結果:")
+    print(f"   ├─ 最大速度: {final_stats['max_velocity']:.6f} lu/ts")
+    print(f"   ├─ 壓力範圍: [{final_pressure['min_pressure']:.3f}, {final_pressure['max_pressure']:.3f}]")
+    print(f"   ├─ 壓力差: {final_pressure['pressure_drop']:.6f}")
+    print(f"   └─ 穩定性: {'✅ 優秀' if final_stats['max_velocity'] < 0.05 else '⚠️ 需調整' if final_stats['max_velocity'] < 0.1 else '❌ 不穩定'}")
     
     return sim
 
@@ -793,28 +898,59 @@ def main():
     print("🚀 進入main函數")
     
     if len(sys.argv) > 1 and sys.argv[1] == "debug":
-        # Debug模式：python main.py debug [步數]
+        # Debug模式：python main.py debug [步數] [壓力驅動模式]
         max_steps = int(sys.argv[2]) if len(sys.argv) > 2 else 250
+        pressure_mode = sys.argv[3] if len(sys.argv) > 3 else "none"
         print(f"🔍 Debug模式 - 最大步數: {max_steps:,}")
+        print(f"💫 壓力驅動模式: {pressure_mode}")
         print("🔄 準備運行debug模擬...")
-        sim = run_debug_simulation(max_steps=max_steps)
+        sim = run_debug_simulation(max_steps=max_steps, pressure_mode=pressure_mode)
         print("✅ Debug模擬完成")
+    elif len(sys.argv) > 1 and sys.argv[1] == "pressure":
+        # 壓力梯度測試模式：python main.py pressure [模式] [步數]
+        pressure_mode = sys.argv[2] if len(sys.argv) > 2 else "density"
+        max_steps = int(sys.argv[3]) if len(sys.argv) > 3 else 100
+        print(f"💫 壓力梯度測試模式")
+        print(f"   ├─ 驅動模式: {pressure_mode}")
+        print(f"   └─ 測試步數: {max_steps:,}")
+        sim = run_pressure_test(pressure_mode=pressure_mode, max_steps=max_steps)
+        print("✅ 壓力梯度測試完成")
     else:
         # 正常模式運行
         print("☕ 手沖咖啡3D模擬系統")
-        print("💡 使用 'python main.py debug [步數]' 進入調試模式")
+        print("💡 使用說明:")
+        print("   🔍 python main.py debug [步數] [壓力模式] - 調試模式")
+        print("   💫 python main.py pressure [模式] [步數] - 壓力梯度測試")
+        print("       模式選項: density, force, mixed, none")
         print()
         
         # 詢問用戶偏好
         try:
             interactive = input("是否啟用互動模式? (y/N): ").lower() == 'y'
             save_output = input("是否保存中間結果? (Y/n): ").lower() != 'n'
+            
+            # 詢問壓力驅動設定
+            print("\n💫 壓力梯度驅動設定:")
+            print("   1. none - 純重力驅動 (預設)")
+            print("   2. density - 密度場調製驅動")
+            print("   3. force - 體力場增強驅動")
+            print("   4. mixed - 混合驅動")
+            pressure_choice = input("選擇驅動模式 (1-4): ").strip()
+            
+            pressure_modes = {"1": "none", "2": "density", "3": "force", "4": "mixed"}
+            pressure_mode = pressure_modes.get(pressure_choice, "none")
+            print(f"   └─ 已選擇: {pressure_mode} 驅動模式")
+            
         except KeyboardInterrupt:
             print("\n取消運行")
             return 0
         
         # 創建並運行模擬
         sim = CoffeeSimulation(interactive=interactive)
+        
+        # 設置壓力驅動模式
+        setup_pressure_drive(sim, pressure_mode)
+        
         success = sim.run(save_output=save_output, show_progress=True)
         
         if success:

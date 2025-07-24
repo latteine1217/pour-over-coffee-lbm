@@ -75,10 +75,7 @@ NU_CHAR = WATER_VISCOSITY_90C
 # 格子尺度轉換 (基於NZ=224格點，物理域14cm)
 SCALE_LENGTH = PHYSICAL_DOMAIN_SIZE / NZ  # 0.625 mm/lu (研究級解析度，完整V60包含)
 SCALE_VELOCITY = 0.01                  # lu/ts (保守初始值，策略2優化)
-
-# 時間尺度優化 (基於重力和黏滯度降低的物理分析)
-TIME_SCALE_OPTIMIZATION_FACTOR = 1.2  # 20%時間步增加 (提升計算效率)
-SCALE_TIME = (SCALE_LENGTH / SCALE_VELOCITY) * TIME_SCALE_OPTIMIZATION_FACTOR  
+SCALE_TIME = SCALE_LENGTH / SCALE_VELOCITY  
 SCALE_DENSITY = RHO_CHAR               
 
 # 網格物理尺寸
@@ -90,10 +87,7 @@ GRID_SIZE_CM = SCALE_LENGTH * 100      # 每個網格的實際尺寸 (0.66 mm)
 
 # 格子單位下的運動黏滯度
 NU_WATER_LU = WATER_VISCOSITY_90C * SCALE_TIME / (SCALE_LENGTH**2)
-
-# 空氣黏滯度安全係數調整 (解決τ_air過度擴散問題)
-AIR_VISCOSITY_SAFETY_FACTOR = 0.15  # 15%安全係數，進一步降低τ_air到合理範圍
-NU_AIR_LU = (AIR_VISCOSITY_20C * AIR_VISCOSITY_SAFETY_FACTOR) * SCALE_TIME / (SCALE_LENGTH**2)
+NU_AIR_LU = AIR_VISCOSITY_20C * SCALE_TIME / (SCALE_LENGTH**2)
 
 # LBM正確理論: ν = c_s²(τ - 0.5), where c_s² = 1/3
 TAU_WATER = max(0.8, NU_WATER_LU / CS2 + 0.5)  # 強制最小值，增加數值穩定性
@@ -113,10 +107,6 @@ if TAU_AIR < MIN_TAU_STABLE:
     print(f"❌ τ_air={TAU_AIR:.6f} < {MIN_TAU_STABLE} 數值不穩定")
 elif TAU_AIR > MAX_TAU_STABLE:
     print(f"⚠️  τ_air={TAU_AIR:.6f} > {MAX_TAU_STABLE} 過度擴散")
-elif TAU_AIR > 1.8:
-    print(f"📊 τ_air={TAU_AIR:.6f} 可接受範圍 (安全係數: {AIR_VISCOSITY_SAFETY_FACTOR*100:.0f}%)")
-else:
-    print(f"✅ τ_air={TAU_AIR:.6f} 最佳範圍 (安全係數: {AIR_VISCOSITY_SAFETY_FACTOR*100:.0f}%)")
 
 # ==============================================
 # 密度和重力
@@ -173,7 +163,7 @@ print(f"Re_physical = {RE_CHAR:.1f}")
 print(f"Re_lattice = {RE_LATTICE:.1f}")
 print(f"Fr = {FR_CHAR:.3f}")
 print(f"特徵時間 = {T_CHAR:.2f}s")
-print(f"格子時間步 = {SCALE_TIME*1000:.1f}ms (優化係數: {TIME_SCALE_OPTIMIZATION_FACTOR:.1f}x)")
+print(f"格子時間步 = {SCALE_TIME*1000:.1f}ms")
 
 # ==============================================
 # LES湍流建模

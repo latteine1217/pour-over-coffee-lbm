@@ -17,7 +17,7 @@ from datetime import datetime
 import config
 
 class EnhancedVisualizer:
-    def __init__(self, lbm_solver, multiphase=None, geometry=None, particle_system=None, filter_system=None, simulation=None):
+    def __init__(self, lbm_solver, multiphase=None, geometry=None, particle_system=None, filter_system=None):
         """
         科研級視覺化系統初始化
         
@@ -27,14 +27,12 @@ class EnhancedVisualizer:
             geometry: 幾何系統
             particle_system: 咖啡顆粒系統
             filter_system: 濾紙系統
-            simulation: 主模擬系統引用（用於診斷數據訪問）
         """
         self.lbm = lbm_solver
         self.multiphase = multiphase
         self.geometry = geometry
         self.particles = particle_system
         self.filter = filter_system
-        self.simulation = simulation  # 新增：用於訪問診斷數據
         
         # 科研分析參數
         self.analysis_data = {
@@ -277,9 +275,7 @@ class EnhancedVisualizer:
     
     def generate_research_report(self, simulation_time, step_num):
         """生成完整的科研報告"""
-        # 計算真實物理時間
-        physical_time = step_num * config.SCALE_TIME
-        print(f"🔬 生成科研級分析報告 (t={physical_time:.2f}s)...")
+        print(f"🔬 生成科研級分析報告 (t={simulation_time:.2f}s)...")
         
         generated_files = []
         
@@ -297,13 +293,14 @@ class EnhancedVisualizer:
         longitudinal_file = self.save_longitudinal_analysis(simulation_time, step_num)
         if longitudinal_file:
             generated_files.append(longitudinal_file)
-            
-        # 4. LBM診斷監控 (新增)
-        if hasattr(self, 'simulation') and hasattr(self.simulation, 'lbm_diagnostics'):
-            lbm_file = self.save_lbm_monitoring_chart(simulation_time, step_num)
-            if lbm_file:
-                generated_files.append(lbm_file)
-                print(f"   📊 LBM診斷: {lbm_file}")
+        
+        velocity_file = self.save_velocity_analysis(simulation_time, step_num)
+        if velocity_file:
+            generated_files.append(velocity_file)
+        
+        combined_file = self.save_combined_analysis(simulation_time, step_num)
+        if combined_file:
+            generated_files.append(combined_file)
         
         print(f"✅ 科研報告生成完成，共 {len(generated_files)} 個文件:")
         for file in generated_files:
@@ -392,9 +389,6 @@ class EnhancedVisualizer:
         try:
             fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
             
-            # 計算真實物理時間
-            physical_time = step_num * config.SCALE_TIME
-            
             # 密度分析
             if hasattr(self.lbm, 'rho'):
                 rho_data = self.lbm.rho.to_numpy()
@@ -406,16 +400,13 @@ class EnhancedVisualizer:
                 z_slice = rho_data[:, config.NY//2, :]
                 
                 im1 = ax1.imshow(z_slice.T, origin='lower', aspect='auto', cmap=self.density_cmap, vmin=0.0, vmax=1.5)
-                ax1.set_title(f'Density Profile (t={physical_time:.2f}s)', fontsize=12)
+                ax1.set_title(f'Density Profile (t={simulation_time:.2f}s)', fontsize=12)
                 ax1.set_xlabel('X Position')
                 ax1.set_ylabel('Z Position')
                 plt.colorbar(im1, ax=ax1)
                 
                 # 添加V60輪廓和邊界
                 self._add_v60_outline_fixed(ax1, 'xz')
-                
-                # 添加濾紙虛線
-                self._add_filter_paper_outline(ax1, 'xz')
                 
                 # 添加顆粒可視化
                 self._add_particles_to_plot(ax1, 'xz', config.NY//2)
@@ -430,16 +421,13 @@ class EnhancedVisualizer:
                     u_slice = u_magnitude[:, config.NY//2, :]
                     
                     im2 = ax2.imshow(u_slice.T, origin='lower', aspect='auto', cmap=self.velocity_cmap, vmin=0.0, vmax=0.1)
-                    ax2.set_title(f'Velocity Magnitude (t={physical_time:.2f}s)', fontsize=12)
+                    ax2.set_title(f'Velocity Magnitude (t={simulation_time:.2f}s)', fontsize=12)
                     ax2.set_xlabel('X Position')
                     ax2.set_ylabel('Z Position')
                     plt.colorbar(im2, ax=ax2)
                     
                     # 添加V60輪廓
                     self._add_v60_outline_fixed(ax2, 'xz')
-                    
-                    # 添加濾紙虛線
-                    self._add_filter_paper_outline(ax2, 'xz')
                     
                     # 添加顆粒可視化
                     self._add_particles_to_plot(ax2, 'xz', config.NY//2)
@@ -460,9 +448,6 @@ class EnhancedVisualizer:
         try:
             fig, ax = plt.subplots(1, 1, figsize=(8, 6))
             
-            # 計算真實物理時間
-            physical_time = step_num * config.SCALE_TIME
-            
             if hasattr(self.lbm, 'u'):
                 u_data = self.lbm.u.to_numpy()
                 u_data = np.nan_to_num(u_data, nan=0.0, posinf=0.0, neginf=0.0)
@@ -475,16 +460,13 @@ class EnhancedVisualizer:
                 u_slice = u_magnitude[:, :, z_level]
                 
                 im = ax.imshow(u_slice.T, origin='lower', aspect='equal', cmap=self.velocity_cmap, vmin=0.0, vmax=0.1)
-                ax.set_title(f'Velocity Field (t={physical_time:.2f}s, Z={z_level})', fontsize=12)
+                ax.set_title(f'Velocity Field (t={simulation_time:.2f}s, Z={z_level})', fontsize=12)
                 ax.set_xlabel('X Position')
                 ax.set_ylabel('Y Position')
                 plt.colorbar(im, ax=ax)
                 
                 # 添加V60頂視圖輪廓
                 self._add_v60_outline_fixed(ax, 'xy')
-                
-                # 添加濾紙虛線
-                self._add_filter_paper_outline(ax, 'xy')
                 
                 # 添加顆粒可視化
                 self._add_particles_to_plot(ax, 'xy', z_level)
@@ -505,9 +487,6 @@ class EnhancedVisualizer:
         try:
             fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(12, 10))
             
-            # 計算真實物理時間
-            physical_time = step_num * config.SCALE_TIME
-            
             if hasattr(self.lbm, 'rho') and hasattr(self.lbm, 'u'):
                 rho_data = self.lbm.rho.to_numpy()
                 u_data = self.lbm.u.to_numpy()
@@ -526,7 +505,6 @@ class EnhancedVisualizer:
                 ax1.set_title('Density (XZ plane)', fontsize=10)
                 plt.colorbar(im1, ax=ax1)
                 self._add_v60_outline_fixed(ax1, 'xz')
-                self._add_filter_paper_outline(ax1, 'xz')
                 self._add_particles_to_plot(ax1, 'xz', config.NY//2)
                 
                 # 速度 XZ切面
@@ -535,7 +513,6 @@ class EnhancedVisualizer:
                 ax2.set_title('Velocity (XZ plane)', fontsize=10)
                 plt.colorbar(im2, ax=ax2)
                 self._add_v60_outline_fixed(ax2, 'xz')
-                self._add_filter_paper_outline(ax2, 'xz')
                 self._add_particles_to_plot(ax2, 'xz', config.NY//2)
                 
                 # 密度 XY切面
@@ -544,7 +521,6 @@ class EnhancedVisualizer:
                 ax3.set_title('Density (XY plane)', fontsize=10)
                 plt.colorbar(im3, ax=ax3)
                 self._add_v60_outline_fixed(ax3, 'xy')
-                self._add_filter_paper_outline(ax3, 'xy')
                 self._add_particles_to_plot(ax3, 'xy', config.NZ//2)
                 
                 # 速度 XY切面
@@ -553,10 +529,9 @@ class EnhancedVisualizer:
                 ax4.set_title('Velocity (XY plane)', fontsize=10)
                 plt.colorbar(im4, ax=ax4)
                 self._add_v60_outline_fixed(ax4, 'xy')
-                self._add_filter_paper_outline(ax4, 'xy')
                 self._add_particles_to_plot(ax4, 'xy', config.NZ//2)
             
-            plt.suptitle(f'Combined Analysis (t={physical_time:.2f}s)', fontsize=14)
+            plt.suptitle(f'Combined Analysis (t={simulation_time:.2f}s)', fontsize=14)
             filename = f'combined_analysis_step_{step_num:04d}.png'
             plt.tight_layout()
             plt.savefig(filename, dpi=300, bbox_inches='tight')
@@ -574,61 +549,6 @@ class EnhancedVisualizer:
         print("💡 使用 generate_research_report() 獲得完整分析")
         print("📊 使用 save_temporal_analysis() 獲得時間序列分析")
     
-    def _add_filter_paper_outline(self, ax, plane='xz'):
-        """添加濾紙虛線輪廓到圖表"""
-        try:
-            if plane == 'xz':
-                # V60幾何參數
-                center_x = config.NX // 2
-                bottom_z = 5  # 濾紙底部位置
-                top_z = bottom_z + config.CUP_HEIGHT / config.SCALE_LENGTH
-                top_radius = config.TOP_RADIUS / config.SCALE_LENGTH
-                bottom_radius = config.BOTTOM_RADIUS / config.SCALE_LENGTH
-                
-                # 濾紙與V60內壁有2mm空隙
-                filter_gap = 0.002 / config.SCALE_LENGTH  # 2mm空隙轉換為格子單位
-                
-                # 計算濾紙輪廓（比V60內壁小一點）
-                filter_top_radius = top_radius - filter_gap
-                filter_bottom_radius = bottom_radius + filter_gap  # 底部濾紙略大於出水孔
-                
-                # 繪製濾紙錐形輪廓（虛線）
-                x_left_top = center_x - filter_top_radius
-                x_right_top = center_x + filter_top_radius
-                x_left_bottom = center_x - filter_bottom_radius
-                x_right_bottom = center_x + filter_bottom_radius
-                
-                # 濾紙側壁（虛線）
-                ax.plot([x_left_top, x_left_bottom], [top_z, bottom_z], 
-                       'gray', linestyle='--', linewidth=1.5, alpha=0.7, label='Filter Paper')
-                ax.plot([x_right_top, x_right_bottom], [top_z, bottom_z], 
-                       'gray', linestyle='--', linewidth=1.5, alpha=0.7)
-                
-                # 濾紙底部（虛線圓弧）
-                filter_bottom_y = bottom_z + 1  # 濾紙底部稍微高一點
-                ax.plot([x_left_bottom, x_right_bottom], [filter_bottom_y, filter_bottom_y], 
-                       'gray', linestyle='--', linewidth=1.5, alpha=0.7)
-                
-            elif plane == 'xy':
-                # XY平面的濾紙圓形輪廓
-                center_x = config.NX // 2
-                center_y = config.NY // 2
-                
-                # 濾紙與V60內壁有2mm空隙
-                filter_gap = 0.002 / config.SCALE_LENGTH
-                top_radius = config.TOP_RADIUS / config.SCALE_LENGTH
-                filter_radius = top_radius - filter_gap
-                
-                # 繪製濾紙圓形輪廓（虛線）
-                circle_filter = plt.Circle((center_x, center_y), filter_radius, 
-                                         fill=False, color='gray', linestyle='--', 
-                                         linewidth=1.5, alpha=0.7, label='Filter Paper')
-                ax.add_patch(circle_filter)
-                
-        except Exception as e:
-            # 如果濾紙輪廓繪製失敗，靜默忽略
-            pass
-            
     def _add_v60_outline_fixed(self, ax, plane='xz'):
         """添加修復版V60輪廓到圖表"""
         try:
@@ -736,131 +656,3 @@ class EnhancedVisualizer:
         except Exception as e:
             # 如果顆粒繪製失敗，靜默忽略
             pass
-
-    def save_lbm_monitoring_chart(self, simulation_time, step_num):
-        """
-        生成LBM診斷監控圖表
-        """
-        try:
-            if not hasattr(self, 'simulation') or not hasattr(self.simulation, 'lbm_diagnostics'):
-                return None
-                
-            diagnostics = self.simulation.lbm_diagnostics
-            if not diagnostics:
-                return None
-                
-            fig = plt.figure(figsize=(16, 10))
-            gs = fig.add_gridspec(3, 2, hspace=0.3, wspace=0.3)
-            
-            # 1. 穩定性監控
-            ax1 = fig.add_subplot(gs[0, 0])
-            if len(diagnostics.history['time_stability']) > 0:
-                ax1.plot(diagnostics.history['time_stability'], label='Time Stability', color='blue')
-                ax1.set_title('LBM Stability Metrics')
-                ax1.set_ylabel('Stability')
-                ax1.set_xlabel('Step')
-                ax1.grid(True)
-                ax1.legend()
-            else:
-                ax1.text(0.5, 0.5, 'No stability data', ha='center', va='center')
-                ax1.set_xlim(0, 1)
-                ax1.set_ylim(0, 1)
-            
-            # 2. Mach數監控
-            ax2 = fig.add_subplot(gs[0, 1])
-            if len(diagnostics.history['max_mach']) > 0:
-                ax2.plot(diagnostics.history['max_mach'], label='Max Mach', color='red')
-                ax2.axhline(y=0.1, color='orange', linestyle='--', label='Warning (Ma=0.1)')
-                ax2.axhline(y=0.3, color='red', linestyle='--', label='Critical (Ma=0.3)')
-                ax2.set_title('Mach Number Monitoring')
-                ax2.set_ylabel('Mach Number')
-                ax2.set_xlabel('Step')
-                ax2.grid(True)
-                ax2.legend()
-            else:
-                ax2.text(0.5, 0.5, 'No Mach data', ha='center', va='center')
-                ax2.set_xlim(0, 1)
-                ax2.set_ylim(0, 1)
-            
-            # 3. 守恆定律
-            ax3 = fig.add_subplot(gs[1, 0])
-            if len(diagnostics.history['mass_conservation']) > 0:
-                ax3.plot(diagnostics.history['mass_conservation'], label='Mass Conservation', color='green')
-                if len(diagnostics.history['momentum_conservation']) > 0:
-                    ax3.plot(diagnostics.history['momentum_conservation'], label='Momentum Conservation', color='purple')
-                ax3.set_title('Conservation Laws')
-                ax3.set_ylabel('Conservation Error')
-                ax3.set_xlabel('Step')
-                ax3.grid(True)
-                ax3.legend()
-            else:
-                ax3.text(0.5, 0.5, 'No conservation data', ha='center', va='center')
-                ax3.set_xlim(0, 1)
-                ax3.set_ylim(0, 1)
-            
-            # 4. V60物理參數
-            ax4 = fig.add_subplot(gs[1, 1])
-            if len(diagnostics.history['v60_flow_rate']) > 0:
-                ax4.plot(diagnostics.history['v60_flow_rate'], label='V60 Flow Rate', color='brown')
-                if len(diagnostics.history['extraction_efficiency']) > 0:
-                    ax4_twin = ax4.twinx()
-                    ax4_twin.plot(diagnostics.history['extraction_efficiency'], label='Extraction Efficiency', color='orange')
-                    ax4_twin.set_ylabel('Efficiency (%)', color='orange')
-                ax4.set_title('V60 Performance Metrics')
-                ax4.set_ylabel('Flow Rate', color='brown')
-                ax4.set_xlabel('Step')
-                ax4.grid(True)
-                ax4.legend(loc='upper left')
-            else:
-                ax4.text(0.5, 0.5, 'No V60 data', ha='center', va='center')
-                ax4.set_xlim(0, 1)
-                ax4.set_ylim(0, 1)
-            
-            # 5. 趨勢分析（合併兩個子圖）
-            ax5 = fig.add_subplot(gs[2, :])
-            if len(diagnostics.history['time_stability']) > 5:
-                steps = range(len(diagnostics.history['time_stability']))
-                
-                # 左Y軸：穩定性相關
-                ax5.plot(steps, diagnostics.history['time_stability'], 'b-', label='Stability', alpha=0.7)
-                if len(diagnostics.history['max_mach']) > 0:
-                    ax5.plot(steps, diagnostics.history['max_mach'], 'r-', label='Max Mach', alpha=0.7)
-                ax5.set_xlabel('Simulation Step')
-                ax5.set_ylabel('Stability & Mach', color='blue')
-                ax5.tick_params(axis='y', labelcolor='blue')
-                ax5.grid(True, alpha=0.3)
-                
-                # 右Y軸：物理參數
-                if len(diagnostics.history['v60_flow_rate']) > 0:
-                    ax5_twin = ax5.twinx()
-                    ax5_twin.plot(steps, diagnostics.history['v60_flow_rate'], 'g-', label='Flow Rate', alpha=0.7)
-                    ax5_twin.set_ylabel('Flow Rate & Physics', color='green')
-                    ax5_twin.tick_params(axis='y', labelcolor='green')
-                    
-                    # 組合圖例
-                    lines1, labels1 = ax5.get_legend_handles_labels()
-                    lines2, labels2 = ax5_twin.get_legend_handles_labels()
-                    lines = lines1 + lines2
-                    labels = labels1 + labels2
-                    ax5.legend(lines, labels, loc='upper left', fontsize=8)
-                else:
-                    ax5.legend(loc='upper left', fontsize=8)
-                    
-                ax5.set_title('LBM Diagnostics Trend Analysis')
-            else:
-                ax5.text(0.5, 0.5, 'Insufficient data for trend analysis', ha='center', va='center')
-                ax5.set_xlim(0, 1)
-                ax5.set_ylim(0, 1)
-            
-            plt.suptitle(f'LBM Comprehensive Diagnostics (t={step_num * config.SCALE_TIME:.2f}s)', fontsize=14)
-            
-            filename = f'lbm_monitoring_step_{step_num:04d}.png'
-            plt.tight_layout()
-            plt.savefig(filename, dpi=300, bbox_inches='tight')
-            plt.close()
-            
-            return filename
-            
-        except Exception as e:
-            print(f"❌ LBM監控圖表生成失敗: {str(e)}")
-            return None

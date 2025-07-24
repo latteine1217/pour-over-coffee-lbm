@@ -202,7 +202,8 @@ class LBMDiagnostics:
             mach_numbers = u_magnitude / cs_lattice
             
             quality['max_mach'] = float(np.max(mach_numbers))
-            quality['mean_mach'] = float(np.mean(mach_numbers[mach_numbers > 1e-10]))
+            active_mach = mach_numbers[mach_numbers > 1e-10]
+            quality['mean_mach'] = float(np.mean(active_mach)) if len(active_mach) > 0 else 0.0
             quality['mach_violation_ratio'] = float(np.sum(mach_numbers > 0.1) / mach_numbers.size)
             
             # 密度變化檢查（LBM假設小密度變化）
@@ -380,7 +381,8 @@ class LBMDiagnostics:
             # 速度場統計
             u_magnitude = np.sqrt(u_data[:,:,:,0]**2 + u_data[:,:,:,1]**2 + u_data[:,:,:,2]**2)
             analysis['max_velocity'] = float(np.max(u_magnitude))
-            analysis['mean_velocity'] = float(np.mean(u_magnitude[u_magnitude > 1e-10]))
+            active_velocities = u_magnitude[u_magnitude > 1e-10]
+            analysis['mean_velocity'] = float(np.mean(active_velocities)) if len(active_velocities) > 0 else 0.0
             analysis['velocity_std'] = float(np.std(u_magnitude))
             
             # 流場複雜度（渦度簡化估算）

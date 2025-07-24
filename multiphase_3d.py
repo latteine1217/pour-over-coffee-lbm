@@ -375,12 +375,16 @@ class MultiphaseFlow3D:
         for i, j, k in ti.ndrange(config.NX, config.NY, config.NZ):
             self.phi[i, j, k] = self.phi_new[i, j, k]
     
-    def step(self):
+    def step(self, step_count=0):
         """執行多相流一個時間步長 - 完整並行流水線"""
         self.compute_gradients()
         self.compute_curvature()
         self.compute_surface_tension_force()
-        self.apply_surface_tension()
+        
+        # 延遲啟動表面張力效果，避免初始化時的數值不穩定
+        if step_count > 10:  # 前10步不施加表面張力
+            self.apply_surface_tension()
+        
         self.update_phase_field_cahn_hilliard()
         self.apply_phase_separation()
         self.copy_phase_field()

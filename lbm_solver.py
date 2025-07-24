@@ -208,7 +208,7 @@ class LBMSolver:
                     rho_local += self.f[q, i, j, k]  # SoA訪問模式
                 self.rho[i, j, k] = rho_local
                 
-                # 計算速度
+                # 計算速度 - 純粹從分布函數計算，不加重力
                 u_local = ti.Vector([0.0, 0.0, 0.0])
                 for q in range(config.Q_3D):
                     e_q = ti.cast(self.e[q], ti.f32)
@@ -217,24 +217,7 @@ class LBMSolver:
                 if rho_local > 1e-12:
                     u_local /= rho_local
                     
-                    # 只在水相區域應用重力 - 修復版
-                    phase_val = self.phase[i, j, k]
-                    if phase_val > 0.0:  # 只在水相區域
-                        # 動態設置重力體力
-                        gravity_strength = config.GRAVITY_LU * 0.001 * phase_val  # 根據水相濃度調整
-                        force = ti.Vector([0.0, 0.0, -gravity_strength])
-                        
-                        tau = config.TAU_WATER if phase_val > 0.5 else config.TAU_AIR
-                        force_term = 0.5 * force * tau / rho_local
-                        
-                        # 更保守的體力限制
-                        max_force_impact = 0.001  # 進一步減小
-                        force_term_magnitude = force_term.norm()
-                        
-                        if force_term_magnitude > max_force_impact:
-                            force_term = force_term * (max_force_impact / force_term_magnitude)
-                        
-                        u_local += force_term
+                    # 注意：重力在collision步驟中應用，不在macroscopic量計算中
                     
                 self.u[i, j, k] = u_local
                 self.u_sq[i, j, k] = u_local.norm_sqr()
@@ -248,11 +231,11 @@ class LBMSolver:
                 
                 # 只在水相區域計算體力 - 策略5：穩定重力計算
                 force = ti.Vector([0.0, 0.0, 0.0])
-                if phase_val > 0.1:  # 只在明顯的水相區域
-                    # 使用漸進的重力強度，避免突變
-                    gravity_strength = config.GRAVITY_LU * phase_val * 0.1  # 減弱10倍
-                    # 限制重力大小，避免數值不穩定
-                    max_gravity = 0.001  # 非常保守的重力限制
+                if phase_val > 0.01:  # 降低閾值，包含更多水相區域
+                    # 使用修正後的重力，config.GRAVITY_LU已設為20%強度
+                    gravity_strength = config.GRAVITY_LU * phase_val  # 移除10倍削弱
+                    # 保守的重力限制，確保數值穩定性
+                    max_gravity = 10.0  # 降低一個數量級
                     gravity_strength = ti.min(gravity_strength, max_gravity)
                     force = ti.Vector([0.0, 0.0, -gravity_strength])
                 
@@ -267,8 +250,8 @@ class LBMSolver:
                     F_q = 0.0
                     if force.norm() > 1e-15:  # 更嚴格的閾值
                         F_q = self._compute_stable_guo_forcing(q, u, force, tau)
-                        # 限制forcing項的大小，防止數值爆炸
-                        max_forcing = 1e-6  # 非常保守的forcing限制
+                        # 保守限制forcing項，確保數值穩定性
+                        max_forcing = 0.01  # 降低一個數量級
                         F_q = ti.max(-max_forcing, ti.min(max_forcing, F_q))
                     
                     # BGK collision with forcing
@@ -334,8 +317,8 @@ class LBMSolver:
         
         forcing_result = 0.0
         
-        # 只有在合理範圍內才計算forcing
-        if force_norm <= 0.01 and u_norm <= 0.1:
+        # 保守的forcing計算範圍，確保數值穩定性
+        if force_norm <= 10.0 and u_norm <= 0.1:  # 降低一個數量級
             # Guo forcing項計算
             eu = e_q.dot(u)
             ef = e_q.dot(force)
