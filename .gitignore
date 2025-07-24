@@ -1,8 +1,15 @@
-# Python
+# Pour-Over CFD Simulation - Professional .gitignore
+
+# ===== Python =====
+# Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
 *$py.class
+
+# C extensions
 *.so
+
+# Distribution / packaging
 .Python
 build/
 develop-eggs/
@@ -21,6 +28,7 @@ share/python-wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+MANIFEST
 
 # Virtual environments
 venv/
@@ -29,25 +37,23 @@ ENV/
 .venv/
 .env
 
-# IDE
+# ===== IDE and Editors =====
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
 
-# Jupyter Notebook
+# ===== Jupyter Notebook =====
 .ipynb_checkpoints
+*.ipynb
 
+# ===== Operating Systems =====
 # macOS
 .DS_Store
 .AppleDouble
 .LSOverride
-
-# Thumbnails
 ._*
-
-# Directories potentially created on remote AFP share
 .AppleDB
 .AppleDesktop
 Network Trash Folder
@@ -59,41 +65,98 @@ Thumbs.db
 ehthumbs.db
 Desktop.ini
 
-# Simulation Output Files
-*.png
-*.jpg
-*.jpeg
-*.gif
-*.mp4
-*.avi
+# ===== CFD Simulation Output =====
+# Visualization files (keep some examples, ignore bulk output)
 simulation_data/
 output/
 results/
 figures/
 plots/
-*.npz
-*.json
-*.csv
-*.txt
-*.log
+visualization/
 
-# Temporary files
-tmp/
-temp/
-.tmp/
+# Allow baseline files but ignore generated results
+!baseline_performance.json
+!benchmark_results/
+benchmark_results/*
+!benchmark_results/.gitkeep
 
-# Scientific computing
+# ===== Data Files =====
+# Large scientific data files
 *.h5
 *.hdf5
 *.mat
+*.npz
 
-# Documentation
-docs/_build/
+# Allow configuration and small data files
+!requirements.txt
+!codecov.yml
+!*.md
 
-# Testing
+# ===== Temporary and Backup Files =====
+tmp/
+temp/
+.tmp/
+*_backup.py
+*_temp.py
+config_backup_*.py
+
+# ===== Testing and Coverage =====
 .pytest_cache/
 .coverage
 htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+*.py,cover
 
-# Profiling
+# ===== Documentation Build =====
+docs/_build/
+docs/*/build/
+
+# ===== Performance and Profiling =====
 *.prof
+*.profile
+perf_*.log
+memory_*.log
+gpu_usage_*.log
+
+# ===== GPU and Computing =====
+# Taichi cache
+.ti_cache/
+ti_cache/
+
+# CUDA cache
+*.fatbin
+*.cubin
+*.ptx
+
+# ===== Research and Development =====
+# Experimental files
+experimental/
+sandbox/
+draft/
+
+# Personal notes
+notes.txt
+todo.txt
+personal_*.py
+
+# ===== Allow Important Files =====
+# Core documentation
+!README.md
+!AGENTS.md
+!LICENSE
+!CONTRIBUTING.md
+
+# Configuration files
+!.github/
+!docs/
+
+# Core Python files
+!*.py
+
+# Requirements and CI
+!requirements*.txt
+!setup.py
+!pyproject.toml
