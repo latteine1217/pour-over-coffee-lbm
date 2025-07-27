@@ -72,7 +72,6 @@ output/
 results/
 figures/
 plots/
-visualization/
 
 # Report directory - keep structure but ignore bulk content
 report/*/images/*.png
