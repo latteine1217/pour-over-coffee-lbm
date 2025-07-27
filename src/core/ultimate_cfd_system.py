@@ -6,12 +6,19 @@ SoA + JAX + Apple Silicon + 記憶體優化的完美結合
 
 import taichi as ti
 import numpy as np
+import sys
+import os
+
+# 添加項目根目錄到路徑
+sys.path.append(os.path.join(os.path.dirname(__file__), '../..'))
+
 import config.config as config
 import time
 from typing import Optional, Dict, Any
 
 # 導入優化模組
 from src.core.ultra_optimized_lbm import UltraOptimizedLBMSolver
+from src.core.cuda_dual_gpu_lbm import CUDADualGPULBMSolver  # NVIDIA P100 * 2 求解器
 from jax_hybrid_core import get_hybrid_core
 from src.core.memory_optimizer import get_memory_optimizer
 from src.core.apple_silicon_optimizations import apply_apple_silicon_optimizations
@@ -31,9 +38,14 @@ class UltimateV60CFDSystem:
     預期總體性能提升: 50-150%
     """
     
-    def __init__(self, enable_jax: bool = True, enable_ultra_optimization: bool = True):
+    def __init__(self, enable_jax: bool = True, enable_ultra_optimization: bool = True, 
+                 force_solver: str = None):
         print("🚀 初始化終極優化版V60 CFD系統...")
-        print("   整合SoA + JAX + Apple Silicon + 記憶體優化")
+        print("   整合SoA + JAX + 多GPU + 記憶體優化")
+        
+        # 檢測硬體平台
+        self.hardware_platform = self._detect_hardware_platform()
+        print(f"   🔍 檢測到硬體平台: {self.hardware_platform}")
         
         # 確保Taichi已初始化 (穩健檢查)
         try:
@@ -43,29 +55,21 @@ class UltimateV60CFDSystem:
             del test_field  # 清理
         except:
             print("⚠️  檢測到Taichi未初始化，執行基礎初始化...")
-            # 使用正確的Taichi API
-            try:
-                ti.init(arch=ti.metal)
-            except:
-                ti.init(arch=ti.cpu)
+            self._init_taichi_for_platform()
         
-        # 應用Apple Silicon基礎優化
-        self.apple_config = apply_apple_silicon_optimizations()
+        # 根據硬體平台應用優化
+        if self.hardware_platform == "apple_silicon":
+            self.apple_config = apply_apple_silicon_optimizations()
+        else:
+            self.apple_config = None
         
         # 初始化優化組件
         self.memory_optimizer = get_memory_optimizer()
         self.jax_core = get_hybrid_core() if enable_jax else None
         
-        # 選擇最佳LBM求解器
-        if enable_ultra_optimization:
-            print("  🔧 啟用超級優化LBM求解器...")
-            self.lbm_solver = UltraOptimizedLBMSolver()
-            self.solver_type = "ultra_optimized"
-        else:
-            print("  📐 使用標準LBM求解器...")
-            from src.core.lbm_solver import LBMSolver
-            self.lbm_solver = LBMSolver()
-            self.solver_type = "standard"
+        # 智能選擇最佳LBM求解器
+        self.lbm_solver, self.solver_type = self._select_optimal_solver(
+            enable_ultra_optimization, force_solver)
         
         # 初始化系統組件
         self._init_system_components()
@@ -81,6 +85,89 @@ class UltimateV60CFDSystem:
         
         print("✅ 終極優化CFD系統初始化完成")
         self._print_optimization_summary()
+    
+    def _detect_hardware_platform(self) -> str:
+        """檢測硬體平台"""
+        import platform
+        import subprocess
+        
+        system = platform.system().lower()
+        if system == "darwin":  # macOS
+            try:
+                # 檢查是否為Apple Silicon
+                result = subprocess.run(['sysctl', '-n', 'machdep.cpu.brand_string'], 
+                                      capture_output=True, text=True)
+                if 'Apple' in result.stdout:
+                    return "apple_silicon"
+                else:
+                    return "intel_mac"
+            except:
+                return "intel_mac"
+        elif system == "linux":
+            # 檢查NVIDIA GPU
+            try:
+                result = subprocess.run(['nvidia-smi'], capture_output=True)
+                if result.returncode == 0:
+                    return "nvidia_gpu"
+            except:
+                pass
+            return "linux_cpu"
+        else:
+            return "unknown"
+    
+    def _init_taichi_for_platform(self):
+        """根據硬體平台初始化Taichi"""
+        if self.hardware_platform == "apple_silicon":
+            try:
+                ti.init(arch=ti.metal, device_memory_GB=8.0)
+                print("   ✅ Apple Silicon Metal初始化成功")
+            except:
+                ti.init(arch=ti.cpu)
+                print("   ⚠️ Metal失敗，使用CPU")
+        elif self.hardware_platform == "nvidia_gpu":
+            try:
+                ti.init(arch=ti.cuda, device_memory_GB=15.0)
+                print("   ✅ NVIDIA CUDA初始化成功")
+            except:
+                ti.init(arch=ti.cpu)
+                print("   ⚠️ CUDA失敗，使用CPU")
+        else:
+            ti.init(arch=ti.cpu)
+            print("   📐 使用CPU計算")
+    
+    def _select_optimal_solver(self, enable_ultra_optimization: bool, force_solver: str):
+        """智能選擇最佳LBM求解器"""
+        if force_solver:
+            print(f"  ⚙️ 強制使用求解器: {force_solver}")
+            if force_solver == "cuda_dual_gpu":
+                return CUDADualGPULBMSolver(), "cuda_dual_gpu"
+            elif force_solver == "ultra_optimized":
+                return UltraOptimizedLBMSolver(), "ultra_optimized"
+        
+        # 自動選擇
+        if self.hardware_platform == "nvidia_gpu":
+            print("  🚀 選擇CUDA雙GPU求解器 (NVIDIA P100優化)")
+            try:
+                return CUDADualGPULBMSolver(), "cuda_dual_gpu"
+            except Exception as e:
+                print(f"     ⚠️ CUDA求解器初始化失敗: {e}")
+                print("     🔄 回退到標準求解器")
+                from src.core.lbm_solver import LBMSolver
+                return LBMSolver(), "standard"
+        
+        elif self.hardware_platform == "apple_silicon":
+            if enable_ultra_optimization:
+                print("  🍎 選擇Apple Silicon超級優化求解器")
+                return UltraOptimizedLBMSolver(), "ultra_optimized"
+            else:
+                print("  📐 使用標準LBM求解器")
+                from src.core.lbm_solver import LBMSolver
+                return LBMSolver(), "standard"
+        
+        else:
+            print("  📐 使用標準LBM求解器 (通用平台)")
+            from src.core.lbm_solver import LBMSolver
+            return LBMSolver(), "standard"
     
     def _init_system_components(self):
         """初始化系統組件"""

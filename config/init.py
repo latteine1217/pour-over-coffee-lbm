@@ -36,7 +36,7 @@ def initialize_taichi_once():
         print("🚀 檢測到 Apple Silicon，啟用專用優化...")
         apple_config = apply_apple_silicon_optimizations()
     
-    # 基於性能測試結果，優先使用GPU，回落到CPU
+    # NVIDIA P100 * 2 優化設置，優先使用CUDA
     try:
         if forced_cpu:
             # CI環境或強制CPU
@@ -50,28 +50,37 @@ def initialize_taichi_once():
             print("✓ 使用CPU計算 (CI環境)")
             _taichi_initialized = True
         else:
+            # NVIDIA P100 * 2 (16GB each) 優化配置
             init_args = {
-                'arch': ti.metal,              # 優先Metal/CUDA GPU
-                'device_memory_GB': 8.0,       # GPU記憶體限制提升至8GB
+                'arch': ti.cuda,               # 優先CUDA for NVIDIA GPUs
+                'device_memory_GB': 15.0,      # P100 16GB per GPU, leave 1GB for system
                 'fast_math': True,             # 快速數學運算
-                'advanced_optimization': True,  # 進階編譯優化
-                'cpu_max_num_threads': 8,      # CPU線程備用
+                'advanced_optimization': True, # 進階編譯優化
+                'cpu_max_num_threads': 16,     # 增加CPU線程以匹配雙GPU設置
                 'debug': False,                # 關閉除錯提升性能
                 'kernel_profiler': False,      # 禁用內核性能分析
-                'offline_cache': False         # 禁用離線快取避免源代碼檢測問題
+                'offline_cache': True,         # CUDA支援離線快取
             }
             
-            # 🍎 Apple Silicon 記憶體優化
-            if apple_config:
-                memory_fraction = apple_config['memory_fraction']
-                init_args['device_memory_GB'] = int(8.0 * memory_fraction)
-                print(f"🍎 Apple Silicon記憶體優化: 使用 {init_args['device_memory_GB']:.1f}GB")
-            
-            ti.init(**init_args)
-            print("✓ 使用GPU計算 (Metal/CUDA加速)")
-            if apple_config:
-                print(f"✅ Apple Silicon優化已啟用 (Block size: {apple_config['block_size']})")
-            _taichi_initialized = True
+            # 嘗試CUDA初始化
+            try:
+                ti.init(**init_args)
+                print("✓ 使用NVIDIA CUDA計算 (P100 * 2 優化)")
+                print(f"🚀 GPU記憶體: {init_args['device_memory_GB']}GB per GPU")
+                print(f"⚡ CUDA統一記憶體已啟用")
+                _taichi_initialized = True
+            except Exception as cuda_error:
+                print(f"⚠️ CUDA初始化失敗: {cuda_error}")
+                # 回退到Metal (如果在macOS) 或 OpenGL
+                try:
+                    init_args['arch'] = ti.opengl
+                    init_args.pop('cuda_stack_limit', None)
+                    init_args.pop('cuda_enable_unified_memory', None)
+                    ti.init(**init_args)
+                    print("✓ 使用OpenGL計算 (CUDA回退)")
+                    _taichi_initialized = True
+                except:
+                    raise cuda_error
     except:
         # GPU初始化失敗時回落到CPU
         ti.init(

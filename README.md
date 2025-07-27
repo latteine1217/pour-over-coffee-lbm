@@ -1,7 +1,8 @@
 # ☕ Pour-Over 咖啡 CFD 流體模擬系統
 
 > **V60手沖咖啡沖煮過程的工業級3D計算流體力學模擬系統**  
-> 🤖 **使用 [opencode](https://opencode.ai) + GitHub Copilot 開發**
+> 🤖 **使用 [opencode](https://opencode.ai) + GitHub Copilot 開發**  
+> 🚀 **NVIDIA P100 雙GPU並行計算優化版**
 
 ## 🎯 專案簡介
 
@@ -12,6 +13,7 @@
 - 🌊 **多相流模擬** - 水-空氣界面動力學  
 - 🔬 **格子玻爾茲曼法** - D3Q19高精度數值模型
 - ⚡ **GPU加速運算** - Taichi框架Metal/CUDA並行
+- ⚡ **雙GPU P2P通訊** - NVIDIA P100雙GPU直接記憶體存取
 - 📊 **即時3D視覺化** - 專業級CFD分析圖表
 - 🆕 **CFD工程師級分析** - 7種專業分析模式
 - 🆕 **智能報告管理** - 時間戳自動目錄結構
