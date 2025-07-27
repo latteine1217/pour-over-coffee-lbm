@@ -4,12 +4,16 @@ Pour-Over Coffee LBM Simulation
 統一的主模擬程式 - 支援2D/3D LBM咖啡萃取模擬
 """
 
+
 # 標準庫導入
 import os
 import signal
 import sys
 import time
 from datetime import datetime
+
+# Add the project root to the Python path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 # 第三方庫導入
 import numpy as np
