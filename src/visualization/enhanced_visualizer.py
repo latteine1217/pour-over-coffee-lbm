@@ -192,8 +192,15 @@ class EnhancedVisualizer:
         pressure_lu = rho_data * config.CS2  # 格子單位壓力
         pressure_physical = pressure_lu * config.SCALE_DENSITY * config.SCALE_VELOCITY**2  # Pa
         
-        # 壓力梯度計算
-        grad_p = np.gradient(pressure_physical)
+        # 壓力梯度計算（優先使用內部梯度場）
+        try:
+            if hasattr(self.lbm, 'grad_rho'):
+                grad_rho = self.lbm.grad_rho.to_numpy()
+                grad_p = grad_rho * config.CS2 * config.SCALE_DENSITY * (config.SCALE_VELOCITY**2)
+            else:
+                grad_p = np.gradient(pressure_physical)
+        except Exception:
+            grad_p = np.gradient(pressure_physical)
         pressure_drop = np.max(pressure_physical) - np.min(pressure_physical)
         
         # 流量計算（各區域）
@@ -262,13 +269,15 @@ class EnhancedVisualizer:
             # 局部Reynolds數分佈
             local_reynolds = (u_mag_physical * l_char) / nu
             
+            local_reynolds_positive = local_reynolds[local_reynolds > 0]
+            
             return {
                 'capillary_number': capillary_number,
                 'bond_number': bond_number,
                 'peclet_number': peclet_number,
-                'local_reynolds_max': np.max(local_reynolds),
-                'local_reynolds_mean': np.mean(local_reynolds[local_reynolds > 0]),
-                'local_reynolds_std': np.std(local_reynolds),
+                'local_reynolds_max': np.max(local_reynolds_positive) if local_reynolds_positive.size > 0 else 0.0,
+                'local_reynolds_mean': np.mean(local_reynolds_positive) if local_reynolds_positive.size > 0 else 0.0,
+                'local_reynolds_std': np.std(local_reynolds_positive) if local_reynolds_positive.size > 0 else 0.0,
                 'local_reynolds_field': local_reynolds
             }
         except Exception as e:
@@ -288,7 +297,7 @@ class EnhancedVisualizer:
             
             # 壓力係數 (Cp)
             u_mag = np.sqrt(u_data[:,:,:,0]**2 + u_data[:,:,:,1]**2 + u_data[:,:,:,2]**2)
-            u_max = np.max(u_mag)
+            u_max = np.max(u_mag) if u_mag.size > 0 else 0.0
             if u_max > 0:
                 dynamic_pressure = 0.5 * config.RHO_WATER * (u_max * config.SCALE_VELOCITY)**2
                 pressure_coefficient = (pressure_physical - np.mean(pressure_physical)) / dynamic_pressure
@@ -302,8 +311,8 @@ class EnhancedVisualizer:
                 'pressure_gradient_magnitude': grad_p_magnitude,
                 'pressure_gradient_components': [grad_p_x, grad_p_y, grad_p_z],
                 'pressure_coefficient': pressure_coefficient,
-                'max_pressure_gradient': np.max(grad_p_magnitude),
-                'pressure_drop_total': np.max(pressure_physical) - np.min(pressure_physical),
+                'max_pressure_gradient': np.max(grad_p_magnitude) if grad_p_magnitude.size > 0 else 0.0,
+                'pressure_drop_total': (np.max(pressure_physical) - np.min(pressure_physical)) if pressure_physical.size > 0 else 0.0,
                 'pressure_profile': pressure_profile
             }
         except Exception as e:

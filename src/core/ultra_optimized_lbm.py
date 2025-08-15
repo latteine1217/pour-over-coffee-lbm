@@ -46,10 +46,10 @@ class UltraOptimizedLBMSolver:
         
         # 初始化計算核心
         self._init_computation_kernels()
-        
+        # 派生梯度與濾波場
+        self._init_derivative_fields()
         # 創建相容性別名 (在所有場創建後)
         self._create_compatibility_aliases()
-        
         print("✅ 超級優化版LBM求解器初始化完成")
         print(f"   記憶體效率提升: +40%")
         print(f"   快取命中率提升: +60%") 
@@ -138,42 +138,83 @@ class UltraOptimizedLBMSolver:
         
         print("    ✅ uint8幾何場，節省75%記憶體")
     
-    def _init_cache_optimized_constants(self):
-        """
-        初始化快取優化的常數
-        
-        Apple GPU constant memory優化:
-        - 離散速度向量
-        - 權重係數  
-        - 預計算係數
-        """
-        print("  🔧 載入GPU常數記憶體...")
-        
-        # 離散速度向量 (GPU常數)
-        self.cx = ti.field(dtype=ti.i32, shape=config.Q_3D)
-        self.cy = ti.field(dtype=ti.i32, shape=config.Q_3D)
-        self.cz = ti.field(dtype=ti.i32, shape=config.Q_3D)
-        
-        # 權重係數
-        self.w = ti.field(dtype=ti.f32, shape=config.Q_3D)
-        
-        # 反向速度映射 (邊界條件需要)
-        self.opposite_dir = ti.field(dtype=ti.i32, shape=config.Q_3D)
-        
-        # 為了相容性，添加別名
-        self.weights = self.w  # 可能有些系統使用這個名稱
-        
-        # 載入資料到GPU
-        self.cx.from_numpy(config.CX_3D.astype(np.int32))
-        self.cy.from_numpy(config.CY_3D.astype(np.int32))
-        self.cz.from_numpy(config.CZ_3D.astype(np.int32))
-        self.w.from_numpy(config.WEIGHTS_3D.astype(np.float32))
-        
-        # 計算反向速度映射
-        opposite_mapping = np.array([0, 2, 1, 4, 3, 6, 5, 8, 7, 10, 9, 12, 11, 14, 13, 16, 15, 18, 17], dtype=np.int32)
-        self.opposite_dir.from_numpy(opposite_mapping)
-        
-        print("    ✅ GPU常數記憶體載入完成")
+    def _init_derivative_fields(self):
+        self.grad_rho = ti.Vector.field(3, dtype=ti.f32, shape=(config.NX, config.NY, config.NZ))
+        self.grad_u = ti.Vector.field(3, dtype=ti.f32, shape=(config.NX, config.NY, config.NZ))
+        self.grad_u_y = ti.Vector.field(3, dtype=ti.f32, shape=(config.NX, config.NY, config.NZ))
+        self.grad_u_z = ti.Vector.field(3, dtype=ti.f32, shape=(config.NX, config.NY, config.NZ))
+        self.rho_smoothed = ti.field(dtype=ti.f32, shape=(config.NX, config.NY, config.NZ))
+        self.u_smoothed = ti.Vector.field(3, dtype=ti.f32, shape=(config.NX, config.NY, config.NZ))
+
+    @ti.kernel
+    def compute_gradients(self):
+        for i, j, k in ti.ndrange(config.NX, config.NY, config.NZ):
+            if self.solid[i, j, k] == 0:
+                im = max(0, i - 1)
+                ip = min(config.NX - 1, i + 1)
+                jm = max(0, j - 1)
+                jp = min(config.NY - 1, j + 1)
+                km = max(0, k - 1)
+                kp = min(config.NZ - 1, k + 1)
+
+                drdx = (self.rho[ip, j, k] - self.rho[im, j, k]) * 0.5
+                drdy = (self.rho[i, jp, k] - self.rho[i, jm, k]) * 0.5
+                drdz = (self.rho[i, j, kp] - self.rho[i, j, km]) * 0.5
+                if i == 0:
+                    drdx = self.rho[ip, j, k] - self.rho[i, j, k]
+                elif i == config.NX - 1:
+                    drdx = self.rho[i, j, k] - self.rho[im, j, k]
+                if j == 0:
+                    drdy = self.rho[i, jp, k] - self.rho[i, j, k]
+                elif j == config.NY - 1:
+                    drdy = self.rho[i, j, k] - self.rho[i, jm, k]
+                if k == 0:
+                    drdz = self.rho[i, j, kp] - self.rho[i, j, k]
+                elif k == config.NZ - 1:
+                    drdz = self.rho[i, j, k] - self.rho[i, j, km]
+                self.grad_rho[i, j, k] = ti.Vector([drdx, drdy, drdz])
+
+                dux_dx = (self.ux[ip, j, k] - self.ux[im, j, k]) * 0.5
+                duy_dy = (self.uy[i, jp, k] - self.uy[i, jm, k]) * 0.5
+                duz_dz = (self.uz[i, j, kp] - self.uz[i, j, km]) * 0.5
+                if i == 0:
+                    dux_dx = self.ux[ip, j, k] - self.ux[i, j, k]
+                elif i == config.NX - 1:
+                    dux_dx = self.ux[i, j, k] - self.ux[im, j, k]
+                if j == 0:
+                    duy_dy = self.uy[i, jp, k] - self.uy[i, j, k]
+                elif j == config.NY - 1:
+                    duy_dy = self.uy[i, j, k] - self.uy[i, jm, k]
+                if k == 0:
+                    duz_dz = self.uz[i, j, kp] - self.uz[i, j, k]
+                elif k == config.NZ - 1:
+                    duz_dz = self.uz[i, j, k] - self.uz[i, j, km]
+                self.grad_u[i, j, k] = ti.Vector([dux_dx, duy_dy, duz_dz])
+
+    @ti.kernel
+    def box_filter(self):
+        for i, j, k in ti.ndrange(config.NX, config.NY, config.NZ):
+            s = 0.0
+            v = ti.Vector([0.0, 0.0, 0.0])
+            count = 0.0
+            for di in ti.static(range(-1, 2)):
+                for dj in ti.static(range(-1, 2)):
+                    for dk in ti.static(range(-1, 2)):
+                        ni = min(max(i + di, 0), config.NX - 1)
+                        nj = min(max(j + dj, 0), config.NY - 1)
+                        nk = min(max(k + dk, 0), config.NZ - 1)
+                        s += self.rho[ni, nj, nk]
+                        v += ti.Vector([self.ux[ni, nj, nk], self.uy[ni, nj, nk], self.uz[ni, nj, nk]])
+                        count += 1.0
+            self.rho_smoothed[i, j, k] = s / count
+            self.u_smoothed[i, j, k] = v / count
+
+    def get_gradients(self):
+        return self.grad_rho, self.grad_u
+
+    def smooth_fields_if_needed(self, step: int, every: int = 10):
+        if step % every == 0:
+            self.box_filter()
     
     def _init_computation_kernels(self):
         """初始化超級優化計算核心"""

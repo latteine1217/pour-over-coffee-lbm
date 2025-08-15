@@ -115,6 +115,11 @@ class FilterPaperSystem:
         self.filter_resistance = ti.field(dtype=ti.f32, shape=(config.NX, config.NY, config.NZ))
         self.filter_blockage = ti.field(dtype=ti.f32, shape=(config.NX, config.NY, config.NZ))
         
+        # Forchheimer非線性阻力參數場
+        self.forchheimer_coeff = ti.field(dtype=ti.f32, shape=(config.NX, config.NY, config.NZ))
+        self.permeability = ti.field(dtype=ti.f32, shape=(config.NX, config.NY, config.NZ))
+        self.velocity_magnitude = ti.field(dtype=ti.f32, shape=(config.NX, config.NY, config.NZ))
+        
         # 濾紙動態狀態
         self.accumulated_particles = ti.field(dtype=ti.f32, shape=(config.NX, config.NY, config.NZ))
         self.local_flow_rate = ti.field(dtype=ti.f32, shape=(config.NX, config.NY, config.NZ))
@@ -169,6 +174,7 @@ class FilterPaperSystem:
         
         self._setup_filter_zones()
         self._calculate_initial_resistance()
+        self._initialize_forchheimer_parameters()
         
         # 計算濾紙覆蓋的錐形表面積
         cup_height_lu = config.CUP_HEIGHT / config.SCALE_LENGTH
@@ -398,58 +404,203 @@ class FilterPaperSystem:
             self.filter_blockage[i, j, k] = 0.0
             self.accumulated_particles[i, j, k] = 0.0
             self.local_flow_rate[i, j, k] = 0.0
+            # 初始化Forchheimer參數場
+            self.forchheimer_coeff[i, j, k] = 0.0
+            self.permeability[i, j, k] = 0.0
+            self.velocity_magnitude[i, j, k] = 0.0
+    
+    @ti.kernel
+    def _initialize_forchheimer_parameters(self):
+        """
+        初始化Forchheimer參數場
+        
+        為所有濾紙區域設置統一的Forchheimer參數。
+        參數基於Ergun方程估算，適用於咖啡濾紙的多孔介質特性。
+        
+        Initialization Process:
+            1. 使用硬編碼的物理參數
+            2. 轉換為格子單位
+            3. 分配到濾紙區域
+            4. 初始化相關計算場
+            
+        Field Initialization:
+            - permeability: 滲透率場 (格子單位)
+            - forchheimer_coeff: Forchheimer係數場
+            - velocity_magnitude: 初始速度幅值場
+            
+        Unit Conversion:
+            物理單位 → 格子單位的準確轉換
+            確保數值計算的穩定性
+        """
+        # 使用Ergun方程估算參數
+        dp = config.PARTICLE_DIAMETER_MM * 1e-3  # 轉換為米
+        porosity = self.PAPER_POROSITY  # 85%
+        
+        # Kozeny-Carman滲透率方程
+        K_phys = (dp**2 * porosity**3) / (180 * (1 - porosity)**2)
+        
+        # Ergun Forchheimer係數
+        beta_phys = 1.75 * (1 - porosity) / (porosity**3)
+        
+        # 轉換為格子單位
+        K_lu = K_phys / (config.SCALE_LENGTH**2)
+        beta_lu = beta_phys  # 無量綱，不需轉換
+        
+        for i, j, k in ti.ndrange(config.NX, config.NY, config.NZ):
+            if self.filter_zone[i, j, k] == 1:
+                self.permeability[i, j, k] = K_lu
+                self.forchheimer_coeff[i, j, k] = beta_lu
+            else:
+                self.permeability[i, j, k] = 0.0
+                self.forchheimer_coeff[i, j, k] = 0.0
+            
+            # 初始化速度幅值場
+            self.velocity_magnitude[i, j, k] = 0.0
+    
+    @ti.kernel
+    def compute_forchheimer_resistance(self):
+        """
+        計算Forchheimer非線性阻力
+        
+        實現完整的Forchheimer方程，包含Darcy線性項和非線性慣性項。
+        這是高速多孔介質流動建模的關鍵方法。
+        
+        Forchheimer Equation:
+            ∇p = (μ/K)u + (ρβ/√K)|u|u
+            
+        Implementation Steps:
+            1. 獲取局部流體速度
+            2. 計算速度幅值 |u|
+            3. 計算Darcy線性阻力項
+            4. 計算Forchheimer非線性項  
+            5. 合成總阻力並應用到體力項
+            
+        Physical Accuracy:
+            - 速度依賴阻力: 高速時非線性效應顯著
+            - 方向性處理: 阻力方向與速度相反
+            - 數值穩定性: 避免除零和過大阻力
+            
+        Coupling with LBM:
+            阻力作為體力項加入LBM方程，
+            影響流體的動量平衡
+        """
+        for i, j, k in ti.ndrange((1, config.NX-1), (1, config.NY-1), (1, config.NZ-1)):
+            if self.filter_zone[i, j, k] == 1 and self.lbm.solid[i, j, k] == 0:
+                # 獲取當前速度向量
+                u_vec = self.lbm.u[i, j, k]
+                u_mag = u_vec.norm()
+                
+                # 更新速度幅值場用於診斷
+                self.velocity_magnitude[i, j, k] = u_mag
+                
+                if u_mag > 1e-8:  # 避免除零
+                    # 獲取局部材料參數
+                    K = self.permeability[i, j, k]
+                    beta = self.forchheimer_coeff[i, j, k]
+                    
+                    if K > 1e-12:  # 確保滲透率有效
+                        # Darcy線性阻力項: μ/K × u
+                        darcy_resistance = config.WATER_VISCOSITY_90C * config.SCALE_TIME / (config.SCALE_LENGTH**2) / K
+                        
+                        # Forchheimer非線性項: ρβ/√K × |u| × u
+                        forchheimer_resistance = (
+                            config.WATER_DENSITY_90C * config.SCALE_TIME**2 / (config.SCALE_LENGTH**3) *
+                            beta * u_mag / ti.sqrt(K)
+                        )
+                        
+                        # 總阻力係數
+                        total_resistance_coeff = darcy_resistance + forchheimer_resistance
+                        
+                        # 阻力向量 (與速度方向相反)
+                        resistance_force = -total_resistance_coeff * u_vec
+                        
+                        # 施加阻力限制以確保數值穩定性
+                        max_resistance = 0.01 * config.SCALE_VELOCITY / config.DT
+                        resistance_magnitude = resistance_force.norm()
+                        if resistance_magnitude > max_resistance:
+                            resistance_force *= max_resistance / resistance_magnitude
+                        
+                        # 將阻力加入體力項 (如果存在)
+                        if hasattr(self.lbm, 'body_force') and self.lbm.body_force is not None:
+                            self.lbm.body_force[i, j, k] += resistance_force
     
     @ti.kernel
     def apply_filter_effects(self):
         """
-        對流體場施加濾紙效應
+        對流體場施加濾紙效應 (Forchheimer增強版)
         
-        實施多孔介質流動阻力，模擬濾紙對流體的阻擋效應。
-        採用指數衰減模型確保數值穩定性。
+        實施完整的Forchheimer多孔介質流動阻力，包含Darcy線性項
+        和高速非線性慣性項。此方法取代了原有的簡化阻力模型。
         
         Physics:
-            - 多孔介質流動: 基於Darcy定律
-            - 動態阻力: 基礎阻力 + 顆粒阻塞
-            - 方向性阻力: 垂直方向主要阻力
-            - 孔隙效應: 水平方向較小阻力
+            - Forchheimer方程: ∇p = (μ/K)u + (ρβ/√K)|u|u
+            - Darcy線性阻力: 低速流動主導
+            - 慣性非線性項: 高速流動修正
+            - 動態阻塞效應: 基於顆粒累積調整
             
-        Resistance Model:
-            total_resistance = base_resistance × (1 + blockage)
-            resistance_factor = exp(-total_resistance × Δt)
-            
-        Velocity Modification:
-            - 垂直速度: 完全阻力衰減
-            - 水平速度: 部分阻力衰減(模擬孔隙)
-            
-        Flow Rate Monitoring:
-            記錄局部流速用於動態調整和統計分析
+        Implementation Strategy:
+            1. 直接計算Forchheimer阻力
+            2. 應用動態阻塞修正
+            3. 直接修正流體速度場
+            4. 避免巢狀kernel調用
             
         Numerical Stability:
-            - 指數衰減模型: 避免數值發散
-            - 保守阻力範圍: 確保物理合理性
-            - 平滑過渡: 避免突變引起的振盪
+            - 阻力限制: 防止過大的速度修正
+            - 指數衰減: 平滑的阻力應用
+            - 邊界安全: 確保不影響邊界點
         """
-        for i, j, k in ti.ndrange(config.NX, config.NY, config.NZ):
+        for i, j, k in ti.ndrange((1, config.NX-1), (1, config.NY-1), (1, config.NZ-1)):
             if self.filter_zone[i, j, k] == 1 and self.lbm.solid[i, j, k] == 0:
                 # 獲取當前流體速度
                 u_local = self.lbm.u[i, j, k]
+                u_mag = u_local.norm()
                 
-                # 計算總阻力 (基礎阻力 + 顆粒堵塞)
-                total_resistance = self.filter_resistance[i, j, k] * (1.0 + self.filter_blockage[i, j, k])
+                # 更新速度幅值場用於診斷
+                self.velocity_magnitude[i, j, k] = u_mag
                 
-                # 施加濾紙阻力 (指數衰減模型)
-                resistance_factor = ti.exp(-total_resistance * config.DT)
-                
-                # 更新速度 (主要影響垂直分量，保持水平分量以模擬孔隙結構)
-                u_local.z *= resistance_factor
-                u_local.x *= (resistance_factor + 1.0) / 2.0  # 水平阻力較小
-                u_local.y *= (resistance_factor + 1.0) / 2.0
-                
-                # 記錄局部流速用於動態調整
-                self.local_flow_rate[i, j, k] = u_local.norm()
-                
-                # 更新LBM場
-                self.lbm.u[i, j, k] = u_local
+                if u_mag > 1e-8 and self.permeability[i, j, k] > 1e-12:
+                    # 獲取Forchheimer參數
+                    K = self.permeability[i, j, k]
+                    beta = self.forchheimer_coeff[i, j, k]
+                    
+                    # 計算Forchheimer阻力係數
+                    # Darcy項: μ/K (線性)
+                    darcy_coeff = config.WATER_VISCOSITY_90C * config.SCALE_TIME / (config.SCALE_LENGTH**2) / K
+                    
+                    # Forchheimer項: ρβ|u|/√K (非線性)  
+                    forchheimer_coeff = (
+                        config.WATER_DENSITY_90C * config.SCALE_TIME**2 / (config.SCALE_LENGTH**3) *
+                        beta * u_mag / ti.sqrt(K)
+                    )
+                    
+                    # 總阻力係數 (考慮動態阻塞)
+                    blockage_factor = 1.0 + self.filter_blockage[i, j, k]
+                    total_resistance_coeff = (darcy_coeff + forchheimer_coeff) * blockage_factor
+                    
+                    # 轉換為衰減因子 (指數衰減模型)
+                    dt_eff = config.DT * 0.5  # 使用較小的有效時間步以確保穩定
+                    resistance_factor = ti.exp(-total_resistance_coeff * dt_eff)
+                    
+                    # 確保穩定性 (阻力不能過強)
+                    resistance_factor = ti.max(0.1, resistance_factor)  # 最大90%速度衰減
+                    
+                    # 應用阻力到速度場
+                    # 垂直方向 (主要阻力)
+                    u_local.z *= resistance_factor
+                    
+                    # 水平方向 (考慮孔隙效應，阻力較小)
+                    horizontal_factor = (resistance_factor + 1.0) * 0.5
+                    u_local.x *= horizontal_factor
+                    u_local.y *= horizontal_factor
+                    
+                    # 更新LBM速度場
+                    self.lbm.u[i, j, k] = u_local
+                    
+                    # 記錄局部流速用於診斷
+                    self.local_flow_rate[i, j, k] = u_local.norm()
+                else:
+                    # 記錄局部流速用於診斷
+                    self.local_flow_rate[i, j, k] = u_local.norm()
     
     @ti.kernel
     def block_particles_at_filter(self, particle_positions: ti.template(), 

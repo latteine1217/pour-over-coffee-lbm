@@ -278,8 +278,8 @@ class PressureGradientDrive:
                     self.lbm.u[i, j, k] = current_u + force_term
                     self.lbm.u_sq[i, j, k] = self.lbm.u[i, j, k].norm_sqr()
     
-    def update_drive(self):
-        """主更新函數 - 在每個時間步調用"""
+    def apply(self, step: int = 0):
+        """在固定時序中被主控呼叫的純應用函數"""
         if self.density_drive_active[None] == 1:
             self.apply_density_drive()
         elif self.force_drive_active[None] == 1:

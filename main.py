@@ -586,27 +586,37 @@ class CoffeeSimulation:
         
         
         
-        # LBM求解（核心流體計算）- 使用超級優化版
-        if hasattr(self.lbm, 'step_ultra_optimized'):
-            self.lbm.step_ultra_optimized()
-        elif hasattr(self.lbm, 'step_with_cfl_control'):
-            local_cfl = self.lbm.step_with_cfl_control()
-            if local_cfl > 0.5:  # 記錄高CFL事件
-                print(f"   步驟{self.step_count}: CFL={local_cfl:.3f}")
-        elif hasattr(self.lbm, 'step_with_particles'):
-            self.lbm.step_with_particles(self.particle_system)
+        # 固定更新時序：collide → apply_pressure_drive → stream → apply_boundary
+        if hasattr(self.lbm, 'collide') and hasattr(self.lbm, 'stream'):
+            self.lbm.collide()
+            if hasattr(self, 'pressure_drive'):
+                self.pressure_drive.apply(self.step_count)
+            self.lbm.stream()
+            if hasattr(self.lbm, 'apply_boundary'):
+                self.lbm.apply_boundary()
+            if hasattr(self.lbm, 'compute_gradients'):
+                self.lbm.compute_gradients()
+            if hasattr(self.lbm, 'smooth_fields_if_needed'):
+                self.lbm.smooth_fields_if_needed(self.step_count, every=10)
         else:
-            self.lbm.step()
+            if hasattr(self.lbm, 'step_ultra_optimized'):
+                self.lbm.step_ultra_optimized()
+            elif hasattr(self.lbm, 'step_with_cfl_control'):
+                local_cfl = self.lbm.step_with_cfl_control()
+                if local_cfl > 0.5:
+                    print(f"   步驟{self.step_count}: CFL={local_cfl:.3f}")
+            elif hasattr(self.lbm, 'step_with_particles'):
+                self.lbm.step_with_particles(self.particle_system)
+            else:
+                self.lbm.step()
+            if hasattr(self, 'pressure_drive'):
+                self.pressure_drive.apply(self.step_count)
+            if hasattr(self.lbm, 'apply_boundary'):
+                self.lbm.apply_boundary()
         
-        # 💫 壓力梯度驅動系統 (新增)
-        if hasattr(self, 'pressure_drive'):
-            self.pressure_drive.update_drive()
-        
-        # 濾紙-顆粒交互作用 (保留顆粒相關功能)
         if self.filter_paper and hasattr(self.filter_paper, 'update_particle_interactions'):
             self.filter_paper.update_particle_interactions(self.particle_system)
         
-        # 多相流處理（使用欠鬆弛）- 傳遞step_count用於啟動延遲
         if self.multiphase:
             self.multiphase.step(self.step_count)
         
@@ -637,17 +647,34 @@ class CoffeeSimulation:
             if self.step_count % 100 == 0:  # 避免錯誤訊息刷屏
                 print(f"   ⚠️  步驟{self.step_count} 診斷計算異常: {str(e)[:50]}")
         
-        # 數值穩定性檢查
+        # 數值穩定性檢查與自動調節
         if self.step_count > 1:
             stats = self.visualizer.get_statistics()
             max_vel = stats.get('max_velocity', 0.0)
             if np.isnan(max_vel) or np.isinf(max_vel):
                 print(f"❌ 步驟{self.step_count}: 數值發散！")
                 return False
-            elif max_vel > 0.15:
+            # CFL 監控與自動降速
+            target_cfl = getattr(config, 'CFL_NUMBER', 0.01)
+            local_cfl = max_vel * getattr(config, 'DT', 1.0) / getattr(config, 'DX', 1.0)
+            if local_cfl > target_cfl * 1.1:
+                if hasattr(self, 'pressure_drive'):
+                    if hasattr(self.pressure_drive, 'MAX_PRESSURE_FORCE'):
+                        self.pressure_drive.MAX_PRESSURE_FORCE *= 0.9
+                if self.step_count % 10 == 0:
+                    print(f"   📉 自動降速: CFL={local_cfl:.3f} → 調降驅動")
+            elif local_cfl < target_cfl * 0.5:
+                if hasattr(self, 'pressure_drive'):
+                    if hasattr(self.pressure_drive, 'MAX_PRESSURE_FORCE'):
+                        self.pressure_drive.MAX_PRESSURE_FORCE *= 1.05
+            # τ 最小監控（僅提示）
+            tau_min = min(getattr(config, 'TAU_WATER', 1.0), getattr(config, 'TAU_AIR', 1.0))
+            if tau_min <= getattr(config, 'MIN_TAU_STABLE', 0.51):
+                if self.step_count % 50 == 0:
+                    print(f"   ⚠️ τ_min={tau_min:.3f} 接近下限")
+            if max_vel > 0.15:
                 print(f"⚠️  步驟{self.step_count}: 速度偏高 {max_vel:.6f}")
         
-        # 更新計數器
         self.step_count += 1
         return True
     
