@@ -176,6 +176,10 @@ class FilterPaperSystem:
         self._calculate_initial_resistance()
         self._initialize_forchheimer_parameters()
         
+        # 將濾紙區域同步到LBM的LES掩膜（在濾紙區域禁用LES）
+        if hasattr(self.lbm, 'les_mask'):
+            self._apply_filter_zone_to_les_mask()
+        
         # 計算濾紙覆蓋的錐形表面積
         cup_height_lu = config.CUP_HEIGHT / config.SCALE_LENGTH
         filter_coverage_height = cup_height_lu
@@ -191,6 +195,13 @@ class FilterPaperSystem:
         print(f"    └─ V60底部設置為開放大洞（正確設計）")
         print(f"    └─ 底部開口直徑: {config.BOTTOM_RADIUS*2*100:.1f}cm")
         print(f"    └─ 流體通過濾紙後從底部開口流出")
+
+    @ti.kernel
+    def _apply_filter_zone_to_les_mask(self):
+        """將filter_zone==1的區域設置為LES禁用（mask=0）"""
+        for i, j, k in ti.ndrange(config.NX, config.NY, config.NZ):
+            if self.filter_zone[i, j, k] == 1:
+                self.lbm.les_mask[i, j, k] = 0
     
     @ti.kernel
     def _setup_v60_geometry(self):

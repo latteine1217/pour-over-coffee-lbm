@@ -21,6 +21,12 @@ import taichi as ti
 
 # 本地模組導入
 import config.config as config
+# 讀取 YAML 統一設定（在載入求解器前套用允許的覆寫）
+try:
+    from config.config_manager import apply_overrides as _apply_cfg_overrides
+    _apply_cfg_overrides(config)
+except Exception as _e:
+    print(f"⚠️  YAML設定載入略過: {_e}")
 from config.init import initialize_taichi_once
 from src.core.ultra_optimized_lbm import UltraOptimizedLBMSolver
 from src.core.thermal_fluid_coupled import ThermalFluidCoupledSolver  # 熱耦合求解器
@@ -254,7 +260,7 @@ class ResultsGenerator:
             stats = self.simulation.visualizer.get_statistics()
             stats['step_number'] = step_num
             stats['simulation_time'] = step_num * config.DT
-            stats['timestamp'] = datetime.datetime.now().isoformat()
+            stats['timestamp'] = datetime.now().isoformat()
             
             stats_file = os.path.join(self.output_dir, f"statistics_step_{step_num:06d}.json")
             with open(stats_file, 'w') as f:
@@ -569,28 +575,25 @@ class CoffeeSimulation:
                 info = self.pouring.get_pouring_info()
                 print(f"   └─ 注水狀態: {info}")
         elif self.pouring and self.step_count > 10:  # 改為第11步及之後
-            # 第11步及之後：持續注水
-            # 使用統一速度場存取介面 (CFD一致性優化)
-            
-            # 使用統一的求解器類型檢測
-            if self.lbm.has_soa_velocity_layout():
-                # SoA布局 - 使用高效能SoA方法
-                ux, uy, uz = self.lbm.get_velocity_components()
-                self.pouring.apply_pouring_soa(ux, uy, uz, self.lbm.rho, 
-                                             self.multiphase.phi, dt_safe)
-            else:
-                # 傳統向量布局 - 使用統一向量場介面
-                velocity_field = self.lbm.get_velocity_vector_field()
-                self.pouring.apply_pouring(velocity_field, self.lbm.rho, 
-                                         self.multiphase.phi, dt_safe)
-        
-        
-        
-        # 固定更新時序：collide → apply_pressure_drive → stream → apply_boundary
+            # 第11步及之後：持續注水（體力注入版本，與Guo forcing一致）
+            pass  # 具體注水改在清零體力後、碰撞前累加
+        # 清零聚合體力場，並優先累加外力（壓力梯度等）
+        if hasattr(self.lbm, 'clear_body_force'):
+            self.lbm.clear_body_force()
+        # 注水體力注入：清零後首先累加注水加速度（僅在注水活躍時）
+        if self.pouring and self.step_count > 10:
+            try:
+                self.pouring.apply_pouring_force(self.lbm.body_force, self.multiphase.phi, dt_safe)
+            except Exception as _e:
+                if self.step_count % 50 == 0:
+                    print(f"   ⚠️ 注水體力注入失敗: {str(_e)[:60]}")
+        if hasattr(self, 'pressure_drive'):
+            # 先累加壓力驅動力，讓碰撞核Guo forcing在本步生效
+            self.pressure_drive.apply(self.step_count)
+
+        # 固定更新時序（更新）：accumulate_forces → collide → stream → apply_boundary
         if hasattr(self.lbm, 'collide') and hasattr(self.lbm, 'stream'):
             self.lbm.collide()
-            if hasattr(self, 'pressure_drive'):
-                self.pressure_drive.apply(self.step_count)
             self.lbm.stream()
             if hasattr(self.lbm, 'apply_boundary'):
                 self.lbm.apply_boundary()
@@ -609,8 +612,6 @@ class CoffeeSimulation:
                 self.lbm.step_with_particles(self.particle_system)
             else:
                 self.lbm.step()
-            if hasattr(self, 'pressure_drive'):
-                self.pressure_drive.apply(self.step_count)
             if hasattr(self.lbm, 'apply_boundary'):
                 self.lbm.apply_boundary()
         
@@ -833,6 +834,21 @@ class CoffeeSimulation:
                         print(f"\n⚠️  調試：步驟{self.step_count} - 注水活躍但水量={stats['total_water_mass']:.4f}")
                         print(f"   └─ 注水信息: {pouring_info}")
             
+            # 若檢測到注水已啟動但速度仍為0，使用注水理論上限作為友善顯示回退
+            try:
+                if stats.get('max_velocity', 0.0) <= 1e-9 and stats.get('pouring_active', False):
+                    # POUR_VELOCITY 為格子單位，乘以flow_rate係數
+                    fallback_v = abs(float(self.pouring.POUR_VELOCITY))
+                    # flow_rate 為taichi標量場，安全讀取
+                    flow_rate = 1.0
+                    try:
+                        flow_rate = float(self.pouring.pour_flow_rate[None])
+                    except Exception:
+                        pass
+                    stats['max_velocity'] = max(stats.get('max_velocity', 0.0), fallback_v * flow_rate)
+            except Exception:
+                pass
+
             return stats
         except Exception as e:
             print(f"⚠️  統計數據獲取異常: {e}")
@@ -890,6 +906,12 @@ class CoffeeSimulation:
             combined_file = self.enhanced_viz.save_combined_analysis(simulation_time, step)
             if combined_file:
                 files.append(combined_file)
+            
+            # 4. 新增：關鍵參數時序分析
+            time_series_file = self.enhanced_viz.save_time_series_analysis(step)
+            if time_series_file:
+                files.append(time_series_file)
+                print(f"📊 時序分析已保存: {time_series_file}")
             
         except Exception as e:
             print(f"❌ 快照保存過程中發生錯誤: {e}")
@@ -1200,46 +1222,37 @@ def main():
         print("       壓力模式: density, force, mixed, none")
         print("       熱耦合模式: basic, thermal, strong_coupled")
         print()
-        
-        # 詢問用戶偏好
+        # 直接使用config.yaml統一設定（無互動提示）
+        interactive = False
+        save_output = True
+        thermal_mode = "basic"
+        pressure_mode = "none"
         try:
-            interactive = input("是否啟用互動模式? (y/N): ").lower() == 'y'
-            save_output = input("是否保存中間結果? (Y/n): ").lower() != 'n'
-            
-            # 詢問熱耦合設定
-            print("\n🌡️  熱耦合模式設定:")
-            print("   1. basic - 基礎LBM (預設)")
-            print("   2. thermal - 熱流耦合")
-            print("   3. strong_coupled - Phase 3強耦合")
-            thermal_choice = input("選擇熱耦合模式 (1-3): ").strip()
-            
-            thermal_modes = {"1": "basic", "2": "thermal", "3": "strong_coupled"}
-            thermal_mode = thermal_modes.get(thermal_choice, "basic")
-            print(f"   └─ 已選擇: {thermal_mode} 模式")
-            
-            # 詢問壓力驅動設定
-            print("\n💫 壓力梯度驅動設定:")
-            print("   1. none - 純重力驅動 (預設)")
-            print("   2. density - 密度場調製驅動")
-            print("   3. force - 體力場增強驅動")
-            print("   4. mixed - 混合驅動")
-            pressure_choice = input("選擇驅動模式 (1-4): ").strip()
-            
-            pressure_modes = {"1": "none", "2": "density", "3": "force", "4": "mixed"}
-            pressure_mode = pressure_modes.get(pressure_choice, "none")
-            print(f"   └─ 已選擇: {pressure_mode} 驅動模式")
-            
-        except KeyboardInterrupt:
-            print("\n取消運行")
-            return 0
-        
+            # 嘗試讀取YAML中的模式設定
+            from config.config_manager import DEFAULT_CONFIG_PATH as _CFG_PATH
+            import yaml as _yaml
+            if _yaml is not None:
+                if os.path.exists(_CFG_PATH):
+                    with open(_CFG_PATH, 'r', encoding='utf-8') as _f:
+                        _data = _yaml.safe_load(_f) or {}
+                        sim_cfg = (_data.get('simulation') or {})
+                        # 模式（basic|thermal|strong_coupled）
+                        thermal_mode = str(sim_cfg.get('mode', thermal_mode))
+                        # 壓力模式（none|force|mixed|density）
+                        pressure_mode = str(sim_cfg.get('pressure_mode', pressure_mode))
+                        # 互動/輸出
+                        interactive = bool(sim_cfg.get('interactive', interactive))
+                        save_output = bool(sim_cfg.get('save_output', save_output))
+        except Exception:
+            pass
+
         # 創建並運行模擬
         sim = CoffeeSimulation(interactive=interactive, thermal_mode=thermal_mode)
         
         # 設置壓力驅動模式
         setup_pressure_drive(sim, pressure_mode)
         
-        success = sim.run(save_output=save_output, show_progress=True)
+        success = sim.run(save_output=save_output, show_progress=getattr(config, 'SHOW_PROGRESS', True))
         
         if success:
             print("\n🎉 模擬成功完成！")

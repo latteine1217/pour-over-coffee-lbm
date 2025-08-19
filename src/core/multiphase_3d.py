@@ -342,14 +342,14 @@ class MultiphaseFlow3D:
     
     @ti.kernel
     def apply_surface_tension(self):
-        """施加表面張力到LBM速度場"""
+        """施加表面張力到LBM體力場（交由Guo forcing處理）"""
         for i, j, k in ti.ndrange(config.NX, config.NY, config.NZ):
             if self.lbm.solid[i, j, k] == 0:  # 流體區域
                 rho_local = self.lbm.rho[i, j, k]
                 
                 if rho_local > 1e-10:
                     acceleration = self.surface_force[i, j, k] / rho_local
-                    self.lbm.u[i, j, k] += acceleration * config.DT
+                    self.lbm.body_force[i, j, k] += acceleration
     
     @ti.kernel
     def update_density_from_phase(self):

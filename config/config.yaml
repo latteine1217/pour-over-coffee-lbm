@@ -1,0 +1,46 @@
+# Unified simulation configuration (example defaults)
+
+simulation:
+  mode: basic              # basic | thermal | strong_coupled
+  max_steps: 500           # total steps for main runs
+  debug_steps: 20          # steps for debug runs
+  pressure_mode: none      # none | force | mixed
+  output_freq: 500         # output frequency
+  interactive: false       # disable interactive prompts
+  save_output: true        # save intermediate results
+  show_progress: true      # show progress bars/logs
+  viz: full                # full | minimal | off
+  diag_freq: 100           # diagnostics frequency
+
+domain:
+  nx: 224
+  ny: 224
+  nz: 224
+  physical_domain_size: 0.14   # meters
+
+pouring:
+  pour_rate_ml_s: 4.0
+  inlet_diameter_m: 0.005   # 0.5 cm nozzle
+
+les:
+  enable_les: true
+  re_threshold: 500.0
+  update_interval: 1       # compute ν_sgs every N steps (>=1)
+
+filter_paper:
+  porosity: 0.85
+  thickness_mm: 0.1
+
+coffee:
+  powder_mass_g: 20
+  particle_diameter_mm: 0.65
+
+boundaries:
+  soa_direct: true         # apply boundaries directly on SoA fields (perf)
+
+kernel:
+  block_dim: 128           # Metal optimal default on M3 (try 256 in benchmarks)
+
+visualization:
+  enable_heavy_plots: false  # disable heavy plots in perf/debug runs
+  dpi: 200                   # default DPI (safe saver will cap if too large)

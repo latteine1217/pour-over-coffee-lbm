@@ -72,6 +72,7 @@ output/
 results/
 figures/
 plots/
+report/
 
 # Report directory - keep structure but ignore bulk content
 report/*/images/*.png
@@ -88,6 +89,8 @@ benchmark_results/*
 *_analysis_step_*.png
 *_cfd_*.png
 cfd_data_export_*.json
+ cfd_data_export_step_*.json
+ cfd_data_export_step_*.npz
 *.png
 !pour_over_geometry_visualization.png
 !3d_geometry_model_with_particles.png

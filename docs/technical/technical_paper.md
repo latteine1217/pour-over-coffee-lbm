@@ -492,3 +492,25 @@ This research was developed using [opencode](https://opencode.ai) and GitHub Cop
 - **Research Code**: Available at [GitHub Repository]
 - **Computational Resources**: GPU-accelerated workstation
 - **Software Framework**: Taichi v1.7.3, Python 3.10
+### 3.3 τ_eff Coupling in Collision
+Instead of applying turbulence via a secondary relaxation channel, we directly integrate
+the SGS viscosity into the BGK collision by defining an effective relaxation time:
+
+$$
+\tau_{eff} = \tau_{mol} + 3\,\nu_{sgs}
+$$
+
+This preserves conservation and improves stability in high-Re regimes. We further disable
+SGS viscosity in porous filter regions, low-shear zones (e.g., $|S|<10^{-3}$), and across
+the two-phase interface thickness band (e.g., $|\phi|<0.9$) to avoid artificial damping.
+
+### 3.4 Unified Guo Forcing for External Forces
+All external forces (gravity, pressure-gradient forcing, surface tension, and porous resistance)
+are accumulated into a `body_force` field and converted to $F_i$ using the Guo forcing scheme
+within the collision step. This yields consistent and stable integration of multiple forcing
+mechanisms without violating the equation of state.
+
+### 3.5 Density Drive Policy
+Density-field modulation is restricted to initialization phases for establishing initial
+pressure stratification. During time stepping, only body-force based driving is used to
+maintain strict conservation and EOS consistency.

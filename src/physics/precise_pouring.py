@@ -17,8 +17,15 @@ class PrecisePouringSystem:
         
         # 基於真實物理的注水速度 (考慮重力加速度)
         self.POUR_HEIGHT_CM = config.POUR_HEIGHT_CM    # 注水高度 12.5cm
-        self.POUR_VELOCITY = config.INLET_VELOCITY_PHYS  # 考慮重力的入水速度
-        self.POUR_HEIGHT = config.NZ * 0.9    # 注水高度 (頂部90%位置)
+        # 使用格子單位速度（已於config中依流量與截面計算並限幅，確保LBM穩定）
+        self.POUR_VELOCITY = config.INLET_VELOCITY  # lu/ts
+        # 注水高度：改為靠近V60杯口上方少量間隙，縮短到達時間
+        v60_bottom_z = 5.0
+        cup_height_lu = int(config.CUP_HEIGHT / config.SCALE_LENGTH)
+        v60_top_z = int(v60_bottom_z + cup_height_lu)
+        clearance = 2  # 於杯口上方2格
+        # 確保不越界且不低於安全下限
+        self.POUR_HEIGHT = max(8, min(int(v60_top_z + clearance), config.NZ - 6))
         
         # 注水狀態
         self.pouring_active = ti.field(dtype=ti.i32, shape=())
@@ -174,6 +181,56 @@ class PrecisePouringSystem:
                     lbm_ux[i, j, k] = radial_vx
                     lbm_uy[i, j, k] = radial_vy
                     lbm_uz[i, j, k] = vertical_velocity
+
+    @ti.kernel
+    def apply_pouring_force(self, lbm_body_force: ti.template(), 
+                            multiphase_phi: ti.template(), dt: ti.f32):
+        """以體力注入的方式施加注水（配合Guo forcing）
+
+        - 僅在噴嘴附近区域施加向下的加速度，避免被SoA巨觀量重算覆寫
+        - 同時將相場設為水相，確保多相界面正確演化
+        - 加速度標度：approx target_u / dt * intensity * flow_rate
+        """
+        if self.pouring_active[None] == 1:
+            # 更新注水時間（用於螺旋軌跡）
+            self.pour_time[None] += dt
+
+            # 當前注水中心
+            pour_x, pour_y = self._get_current_pour_position()
+
+            # 注水影響區域
+            pour_radius = self.POUR_DIAMETER_GRID / 2.0
+            pour_z = self.POUR_HEIGHT
+
+            for i, j, k in ti.ndrange(config.NX, config.NY, config.NZ):
+                dx = i - pour_x
+                dy = j - pour_y
+                distance_to_pour = ti.sqrt(dx*dx + dy*dy)
+
+                # 噴嘴下方3-4格範圍
+                pour_stream_height = 4.0
+                if distance_to_pour <= pour_radius and k >= pour_z and k <= pour_z + pour_stream_height:
+                    # 高斯徑向分佈 + 指數式垂直衰減
+                    intensity = ti.exp(-0.5 * (distance_to_pour / pour_radius)**2)
+                    vertical_distance = k - pour_z
+                    vertical_decay = ti.exp(-vertical_distance / 2.0)
+                    total_intensity = intensity * vertical_decay
+
+                    # 設置水相（促進多相界面成長）
+                    multiphase_phi[i, j, k] = 1.0
+
+                    # 以目標速度/時間步近似所需加速度，並限幅
+                    # 注意：POUR_VELOCITY為lu/ts，dt為本步使用時間步
+                    accel_mag = 0.0
+                    if dt > 1e-8:
+                        accel_mag = self.POUR_VELOCITY * total_intensity * self.pour_flow_rate[None] / dt
+                    # 限制過大加速度數值，避免forcing被內核夾制後失真
+                    accel_mag = ti.min(accel_mag, 10.0)  # 與重力同級上限
+
+                    # 僅施加向下加速度（z負向）；徑向分散由流場自行演化
+                    bf = lbm_body_force[i, j, k]
+                    bf += ti.Vector([0.0, 0.0, -accel_mag])
+                    lbm_body_force[i, j, k] = bf
     
     @ti.func
     def _get_current_pour_position(self):

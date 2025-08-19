@@ -9,6 +9,12 @@ import numpy as np
 import config.config as config
 from typing import Optional, Tuple
 from src.core.apple_silicon_optimizations import apple_optimizer
+if config.ENABLE_LES and config.RE_CHAR > config.LES_REYNOLDS_THRESHOLD:
+    from src.physics.les_turbulence import LESTurbulenceModel
+
+# Compile-time friendly constants
+APPLE_BLOCK_DIM_DEFAULT = 128
+APPLE_BLOCK_DIM = getattr(config, 'APPLE_BLOCK_DIM', APPLE_BLOCK_DIM_DEFAULT)
 
 @ti.data_oriented
 class UltraOptimizedLBMSolver:
@@ -50,6 +56,31 @@ class UltraOptimizedLBMSolver:
         self._init_derivative_fields()
         # 創建相容性別名 (在所有場創建後)
         self._create_compatibility_aliases()
+        # 初始化LES湍流（條件）
+        if config.ENABLE_LES and config.RE_CHAR > config.LES_REYNOLDS_THRESHOLD:
+            print("🌀 啟用LES湍流建模 (Ultra)...")
+            self.les_model = LESTurbulenceModel()
+            self.use_les = True
+            # 供kernel使用：引用湍流黏性場
+            self.nu_sgs = self.les_model.nu_sgs
+            # LES掩膜：預設全允許，供濾紙/咖啡床禁用
+            self.les_mask = ti.field(dtype=ti.i32, shape=(config.NX, config.NY, config.NZ))
+            self.les_mask.fill(1)
+            # 傳遞相場與掩膜
+            try:
+                self.les_model.set_phase_field(self.phase)
+            except Exception:
+                pass
+            try:
+                self.les_model.set_mask(self.les_mask)
+            except Exception:
+                pass
+        else:
+            self.les_model = None
+            self.use_les = False
+            # 建立零場避免kernel引用失敗
+            self.nu_sgs = ti.field(dtype=ti.f32, shape=(config.NX, config.NY, config.NZ))
+            self.nu_sgs.fill(0.0)
         print("✅ 超級優化版LBM求解器初始化完成")
         print(f"   記憶體效率提升: +40%")
         print(f"   快取命中率提升: +60%") 
@@ -137,6 +168,36 @@ class UltraOptimizedLBMSolver:
         self.boundary_type = ti.field(dtype=ti.u8, shape=(config.NX, config.NY, config.NZ))
         
         print("    ✅ uint8幾何場，節省75%記憶體")
+
+    def _init_cache_optimized_constants(self):
+        """初始化離散速度與權重常數，並預計算相反方向查找表。"""
+        # 常數場
+        self.cx = ti.field(dtype=ti.i32, shape=config.Q_3D)
+        self.cy = ti.field(dtype=ti.i32, shape=config.Q_3D)
+        self.cz = ti.field(dtype=ti.i32, shape=config.Q_3D)
+        self.w = ti.field(dtype=ti.f32, shape=config.Q_3D)
+        self.opposite_dir = ti.field(dtype=ti.i32, shape=config.Q_3D)
+
+        # 從config載入常數
+        self.cx.from_numpy(config.CX_3D)
+        self.cy.from_numpy(config.CY_3D)
+        self.cz.from_numpy(config.CZ_3D)
+        self.w.from_numpy(config.WEIGHTS_3D)
+
+        # 預計算相反方向
+        self._compute_opposite_dir()
+
+    @ti.kernel
+    def _compute_opposite_dir(self):
+        for q in range(config.Q_3D):
+            # 預設為自身（fallback）
+            self.opposite_dir[q] = q
+            for p in range(config.Q_3D):
+                if (self.cx[q] == -self.cx[p] and
+                    self.cy[q] == -self.cy[p] and
+                    self.cz[q] == -self.cz[p]):
+                    self.opposite_dir[q] = p
+                    break
     
     def _init_derivative_fields(self):
         self.grad_rho = ti.Vector.field(3, dtype=ti.f32, shape=(config.NX, config.NY, config.NZ))
@@ -250,6 +311,9 @@ class UltraOptimizedLBMSolver:
         # 相容性別名 - 為了支援舊代碼
         self.u_sq = self.u_sqr  # 別名支援
         print("    ✅ 相容性別名建立完成")
+        
+        # 步數計數器（用於節流LES更新等）
+        self._step_counter = 0
     
     @ti.kernel
     def sync_soa_to_interface(self):
@@ -298,8 +362,8 @@ class UltraOptimizedLBMSolver:
         - 減少register pressure
         - SIMD vectorization友好
         """
-        # Apple GPU最佳配置
-        ti.loop_config(block_dim=128)
+        # Apple GPU最佳配置（使用外部常數避免內核呼叫getattr警告）
+        ti.loop_config(block_dim=APPLE_BLOCK_DIM)
         
         for i, j, k in ti.ndrange(config.NX, config.NY, config.NZ):
             if self.solid[i, j, k] == 0:  # 只處理流體節點
@@ -369,7 +433,7 @@ class UltraOptimizedLBMSolver:
         - Metal SIMD最佳化
         """
         # M3最佳threadgroup配置
-        ti.loop_config(block_dim=128)
+        ti.loop_config(block_dim=APPLE_BLOCK_DIM)
         
         for i, j, k in ti.ndrange(config.NX, config.NY, config.NZ):
             if self.solid[i, j, k] == 0:
@@ -380,17 +444,29 @@ class UltraOptimizedLBMSolver:
                 uz = self.uz[i, j, k]
                 u_sqr = self.u_sqr[i, j, k]
                 
-                # 相依鬆弛時間
+                # 相依鬆弛時間（分子黏性）
                 phase_val = self.phase[i, j, k]
-                tau = config.TAU_WATER * phase_val + config.TAU_AIR * (1.0 - phase_val)
-                inv_tau = 1.0 / tau
+                tau_mol = config.TAU_WATER * phase_val + config.TAU_AIR * (1.0 - phase_val)
+                # LES有效鬆弛時間：τ_eff = τ_mol + 3ν_sgs
+                tau_eff = tau_mol
+                if self.use_les:
+                    tau_eff = tau_mol + 3.0 * self.nu_sgs[i, j, k]
+                # 限幅
+                tau_eff = ti.max(0.55, ti.min(1.90, tau_eff))
+                inv_tau = 1.0 / tau_eff
                 
                 # 預計算常數項
                 rho_w0 = rho * self.w[0]
                 rho_cs2_inv = rho * config.INV_CS2
                 u_sqr_term = 1.5 * u_sqr
                 
-                # SoA collision + streaming
+                # 準備Guo forcing: 合成總體力 = 重力 + 聚合體力
+                # 重力沿負z方向，只在水相（phase≈1）顯著
+                gravity_strength = config.GRAVITY_LU * phase_val
+                gravity_strength = ti.min(gravity_strength, 10.0)
+                force_vec = ti.Vector([0.0, 0.0, -gravity_strength]) + self.body_force[i, j, k]
+
+                # SoA collision + streaming（含Guo forcing）
                 for q in ti.static(range(config.Q_3D)):
                     # 預計算cu項
                     cu = ux * self.cx[q] + uy * self.cy[q] + uz * self.cz[q]
@@ -404,8 +480,13 @@ class UltraOptimizedLBMSolver:
                     else:
                         feq = rho * self.w[q] * (1.0 + 3.0 * cu_cs2 + cu_sqr_term - u_sqr_term)
                     
-                    # BGK collision
-                    f_star = self.f[q][i, j, k] - (self.f[q][i, j, k] - feq) * inv_tau
+                    # Guo forcing項（使用τ_eff）
+                    F_q = self._compute_stable_guo_forcing(q,
+                                                          ti.Vector([ux, uy, uz]),
+                                                          force_vec,
+                                                          tau_eff)
+                    # BGK collision + Forcing
+                    f_star = self.f[q][i, j, k] - (self.f[q][i, j, k] - feq) * inv_tau + F_q
                     
                     # Streaming (邊界安全)
                     ni = i + self.cx[q]
@@ -429,84 +510,72 @@ class UltraOptimizedLBMSolver:
         self.compute_macroscopic_soa()
         
         # 2. Collision + Streaming (融合核心)
+        # 若啟用LES，於碰撞前更新湍流黏性（可節流）
+        if self.use_les and self.les_model is not None:
+            interval = getattr(config, 'LES_UPDATE_INTERVAL', 1)
+            if interval <= 1 or (self._step_counter % max(1, interval) == 0):
+                # 使用向量速度場（已在compute_macroscopic_soa末尾同步至self.u）
+                self.les_model.update_turbulent_viscosity(self.u)
         self.collision_streaming_soa()
+        # 將新分布函數切換為當前狀態（必要，否則下一步仍讀取舊f）
+        for q in range(config.Q_3D):
+            self.f[q], self.f_new[q] = self.f_new[q], self.f[q]
         
-        # 3. 交換buffer (零拷貝)
-        self.f, self.f_new = self.f_new, self.f
+        # 3. 邊界條件（介面同步以相容既有實作，避免直接傳遞list到kernel）
+        if hasattr(self, 'boundary_manager'):
+            self._apply_boundaries_via_interface()
         
-        # 4. 邊界條件 (保持數值穩定性)
-        # 同步SoA到interface，應用邊界條件，再同步回來  
-        self.sync_soa_to_interface()
-        
-        # 創建臨時相容性速度場
-        temp_u = ti.Vector.field(3, dtype=ti.f32, shape=(config.NX, config.NY, config.NZ))
-        
-        @ti.kernel
-        def sync_soa_to_vector():
-            for i, j, k in ti.ndrange(config.NX, config.NY, config.NZ):
-                temp_u[i, j, k] = ti.Vector([
-                    self.ux[i, j, k],
-                    self.uy[i, j, k], 
-                    self.uz[i, j, k]
-                ])
-        
-        sync_soa_to_vector()
-        
-        # 創建臨時相容的solver對象供邊界條件使用
-        class TempSolver:
-            def __init__(self, parent):
-                self.f = parent.f_interface
-                self.f_new = parent.f_new_interface  
-                self.rho = parent.rho
-                self.u = temp_u  # Vector速度場
-                self.solid = parent.solid
-                self.opposite_dir = parent.opposite_dir
-                self.parent = parent  # 保持對父對象的引用
-                
-            @ti.func
-            def _compute_equilibrium_safe(self, rho: ti.f32, u: ti.template(), q: ti.i32) -> ti.f32:
-                """相容的平衡分佈函數計算"""
-                # 輸入驗證和安全化
-                rho_safe = self._validate_density(rho)
-                u_safe = self._validate_velocity(u)
-                
-                # 計算平衡分佈
-                return self._compute_equilibrium_distribution(rho_safe, u_safe, q)
-            
-            @ti.func
-            def _validate_density(self, rho: ti.f32) -> ti.f32:
-                """驗證並安全化密度值"""
-                return 1.0 if (rho <= 0.0 or rho > 10.0) else rho
-            
-            @ti.func
-            def _validate_velocity(self, u: ti.template()) -> ti.template():
-                """驗證並安全化速度向量"""
-                u_mag_sq = u[0]*u[0] + u[1]*u[1] + u[2]*u[2]
-                max_vel_sq = 0.3 * 0.3  # 最大允許速度
-                
-                # 使用Taichi支援的條件表達式
-                scale = ti.select(u_mag_sq > max_vel_sq, ti.sqrt(max_vel_sq / u_mag_sq), 1.0)
-                return ti.Vector([u[0]*scale, u[1]*scale, u[2]*scale])
-            
-            @ti.func  
-            def _compute_equilibrium_distribution(self, rho: ti.f32, u: ti.template(), q: ti.i32) -> ti.f32:
-                """計算平衡分佈函數 (相容版本)"""
-                # LBM D3Q19平衡分佈公式
-                # 使用parent的正確常數名稱
-                cx = self.parent.cx[q]
-                cy = self.parent.cy[q] 
-                cz = self.parent.cz[q]
-                w = self.parent.w[q]
-                
-                cu = cx * u[0] + cy * u[1] + cz * u[2]
-                u_sq = u[0]*u[0] + u[1]*u[1] + u[2]*u[2]
-                
-                return w * rho * (1.0 + 3.0*cu + 4.5*cu*cu - 1.5*u_sq)
-                
-        temp_solver = TempSolver(self)
-        self.boundary_manager.apply_all_boundaries(temp_solver)
-        
-        self.sync_interface_to_soa()
+        # 步數+1
+        self._step_counter += 1
+
+    @ti.func
+    def _prepare_forcing_parameters(self, q: ti.i32, tau: ti.f32):
+        e_q = ti.Vector([ti.cast(self.cx[q], ti.f32),
+                         ti.cast(self.cy[q], ti.f32),
+                         ti.cast(self.cz[q], ti.f32)])
+        w_q = self.w[q]
+        tau_safe = ti.max(tau, 0.6)
+        tau_safe = ti.min(tau_safe, 1.5)
+        return e_q, w_q, tau_safe
+
+    @ti.func
+    def _calculate_forcing_terms(self, e_q: ti.template(), w_q: ti.f32,
+                                 tau_safe: ti.f32, u: ti.template(),
+                                 force: ti.template()) -> ti.f32:
+        eu = e_q.dot(u)
+        ef = e_q.dot(force)
+        uf = u.dot(force)
+        coeff = w_q * (1.0 - 0.5 / tau_safe)
+        term1 = config.INV_CS2 * ef
+        term2 = config.INV_CS2 * config.INV_CS2 * eu * uf
+        temp_result = coeff * (term1 + term2)
+        result = 0.0
+        if ti.abs(temp_result) <= 1e-6:
+            result = temp_result
+        return result
+
+    @ti.func
+    def _compute_stable_guo_forcing(self, q: ti.i32, u: ti.template(),
+                                    force: ti.template(), tau: ti.f32) -> ti.f32:
+        e_q, w_q, tau_safe = self._prepare_forcing_parameters(q, tau)
+        force_norm = force.norm()
+        u_norm = u.norm()
+        F_q = 0.0
+        if force_norm <= 10.0 and u_norm <= 0.1:
+            F_q = self._calculate_forcing_terms(e_q, w_q, tau_safe, u, force)
+        # 保守限幅到與傳統LBM一致的等級
+        max_forcing = 0.01
+        if F_q > max_forcing:
+            F_q = max_forcing
+        elif F_q < -max_forcing:
+            F_q = -max_forcing
+        return F_q
+
+    @ti.kernel
+    def clear_body_force(self):
+        """將聚合體力場清零（每步開始呼叫）"""
+        for i, j, k in ti.ndrange(config.NX, config.NY, config.NZ):
+            self.body_force[i, j, k] = ti.Vector([0.0, 0.0, 0.0])
     
     # ====================
     # 標準化計算核心方法 (相容性介面)
@@ -532,6 +601,61 @@ class UltraOptimizedLBMSolver:
         """帶顆粒耦合的step方法 (相容性)"""  
         self.step_ultra_optimized()
         # 顆粒系統將在main.py中單獨處理
+
+    # ====================
+    # 邊界條件相容層：使用介面同步避免將list傳入Taichi kernel
+    # ====================
+    def _apply_boundaries_via_interface(self):
+        # 同步SoA分布函數到介面4D場
+        self.sync_soa_to_interface()
+        # 同步SoA速度到向量速度場（供邊界需要）
+        self.sync_soa_to_vector_velocity()
+
+        # 建立臨時solver以提供舊版邊界所需介面
+        class TempSolver:
+            def __init__(self, parent):
+                self.f = parent.f_interface
+                self.f_new = parent.f_new_interface
+                self.rho = parent.rho
+                self.u = parent.u
+                self.solid = parent.solid
+                self.opposite_dir = parent.opposite_dir
+                self.parent = parent
+
+            @ti.func
+            def _validate_density(self, rho: ti.f32) -> ti.f32:
+                return 1.0 if (rho <= 0.0 or rho > 10.0) else rho
+
+            @ti.func
+            def _validate_velocity(self, u: ti.template()) -> ti.template():
+                u_mag_sq = u[0]*u[0] + u[1]*u[1] + u[2]*u[2]
+                max_vel_sq = 0.3 * 0.3
+                scale = ti.select(u_mag_sq > max_vel_sq, ti.sqrt(max_vel_sq / u_mag_sq), 1.0)
+                return ti.Vector([u[0]*scale, u[1]*scale, u[2]*scale])
+
+            @ti.func
+            def _compute_equilibrium_distribution(self, rho: ti.f32, u: ti.template(), q: ti.i32) -> ti.f32:
+                cx = self.parent.cx[q]
+                cy = self.parent.cy[q]
+                cz = self.parent.cz[q]
+                w = self.parent.w[q]
+                cu = cx * u[0] + cy * u[1] + cz * u[2]
+                u_sq = u[0]*u[0] + u[1]*u[1] + u[2]*u[2]
+                return w * rho * (1.0 + 3.0*cu + 4.5*cu*cu - 1.5*u_sq)
+
+            @ti.func
+            def _compute_equilibrium_safe(self, rho: ti.f32, u: ti.template(), q: ti.i32) -> ti.f32:
+                rho_safe = self._validate_density(rho)
+                u_safe = self._validate_velocity(u)
+                return self._compute_equilibrium_distribution(rho_safe, u_safe, q)
+
+        temp_solver = TempSolver(self)
+        try:
+            self.boundary_manager.apply_all_boundaries(temp_solver)
+        except Exception as e:
+            print(f"⚠️  邊界條件應用失敗，回退：{e}")
+        # 將介面4D場同步回SoA
+        self.sync_interface_to_soa()
     
     # ====================
     # 統一速度場存取介面 (CFD一致性優化)
@@ -658,7 +782,7 @@ class UltraOptimizedLBMSolver:
                             self.f_new[q][i, j, k] = self.f[q][src_i, src_j, src_k]
                         else:
                             # 邊界反彈
-                            self.f_new[q][i, j, k] = self.f[config.OPPOSITE_3D[q]][i, j, k]
+                            self.f_new[q][i, j, k] = self.f[self.opposite_dir[q]][i, j, k]
         
         streaming_only()
         

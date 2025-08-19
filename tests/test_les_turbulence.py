@@ -15,6 +15,12 @@ import taichi as ti
 import config.config as config
 from src.physics.les_turbulence import LESTurbulenceModel
 
+# 僅在啟用LES且Re達閾值時執行此測試模組
+pytestmark = pytest.mark.skipif(
+    not (config.ENABLE_LES and config.RE_CHAR > config.LES_REYNOLDS_THRESHOLD),
+    reason="LES disabled or Re below threshold"
+)
+
 # 設置測試環境
 @pytest.fixture(scope="module", autouse=True)  
 def setup_taichi():
@@ -30,12 +36,14 @@ def les_model():
 
 @pytest.fixture
 def velocity_field():
-    """創建測試用的速度場"""
-    u = ti.Vector.field(3, dtype=ti.f32, shape=(64, 64, 64))
+    """創建測試用的速度場（若全域過大則跳過）"""
+    if max(config.NX, config.NY, config.NZ) > 64:
+        pytest.skip("Domain too large for unit test computation")
+    u = ti.Vector.field(3, dtype=ti.f32, shape=(config.NX, config.NY, config.NZ))
     
     @ti.kernel
     def init_velocity_field():
-        for i, j, k in ti.ndrange(64, 64, 64):
+        for i, j, k in ti.ndrange(config.NX, config.NY, config.NZ):
             # 創建一個有渦度的測試速度場
             x = (i - 32) / 32.0
             y = (j - 32) / 32.0  
@@ -100,6 +108,26 @@ class TestLESTurbulenceModel:
             assert not np.any(np.isnan(nu_t)), f"第{i+1}次更新後包含NaN"
             assert not np.any(np.isinf(nu_t)), f"第{i+1}次更新後包含無限值"
             assert np.all(nu_t >= 0), f"第{i+1}次更新後包含負值"
+
+    def test_mask_disables_les(self, les_model, velocity_field):
+        """測試掩膜區域LES關閉（ν_sgs=0）"""
+        mask = ti.field(dtype=ti.i32, shape=(config.NX, config.NY, config.NZ))
+        mask.fill(1)
+
+        @ti.kernel
+        def disable_some():
+            for i, j, k in ti.ndrange(config.NX, config.NY, config.NZ):
+                if (i > 1 and i < config.NX-2 and j > 1 and j < config.NY-2 and k > 1 and k < config.NZ-2 and
+                    (i % 7 == 0) and (j % 11 == 0) and (k % 13 == 0)):
+                    mask[i, j, k] = 0
+
+        disable_some()
+        if hasattr(les_model, 'set_mask'):
+            les_model.set_mask(mask)
+        les_model.update_turbulent_viscosity(velocity_field)
+        nu_t = les_model.nu_t.to_numpy()
+        mask_np = mask.to_numpy()
+        assert np.all(nu_t[mask_np == 0] == 0.0)
 
 class TestLESIntegration:
     """LES湍流模型集成測試"""

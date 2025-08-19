@@ -251,26 +251,36 @@ BREWING_TIME_SECONDS = 140             # 2:20
 
 # 注水幾何
 POUR_HEIGHT_CM = 12.5
-INLET_DIAMETER_RATIO = 0.2             # V60上徑的20%
-INLET_DIAMETER = 2 * TOP_RADIUS * INLET_DIAMETER_RATIO
-INLET_AREA = math.pi * (INLET_DIAMETER/2.0)**2
 
-# 入水速度計算 (修正LBM穩定性)
-INLET_VELOCITY_BASE = POUR_RATE_M3_S / INLET_AREA  # 基於流量的速度 (0.009 m/s)
+# 以物理單位設定入口直徑，提供噴嘴上限（不再支援比例參數）
+INLET_DIAMETER_M = 0.005              # 直接設定入口直徑（m），預設0.5 cm
+NOZZLE_DIAMETER_M = 0.005             # 物理噴嘴直徑上限（0.5 cm）
 
-# 重力加速修正 - 實際手沖過程中水流已接近穩定狀態，不需要完整自由落體速度
-# 使用較小的重力修正，保持LBM數值穩定性
+# 重力加速修正（用於速度推導）
 GRAVITY_CORRECTION = 0.05  # 5% 重力修正，而非完整自由落體
-INLET_VELOCITY_PHYS = INLET_VELOCITY_BASE * (1.0 + GRAVITY_CORRECTION)  # ~0.0095 m/s
 
-# 格子單位入水速度 - 確保 << 0.1 以維持LBM穩定性
-INLET_VELOCITY_LU = INLET_VELOCITY_PHYS * SCALE_TIME / SCALE_LENGTH
-INLET_VELOCITY = min(0.05, INLET_VELOCITY_LU)  # 強制限制在穩定範圍內
+def _compute_inlet_diameter(verbose: bool = False) -> float:
+    """計算實際入水直徑（m），僅使用 INLET_DIAMETER_M，並夾制至噴嘴上限。"""
+    d = min(INLET_DIAMETER_M, NOZZLE_DIAMETER_M)
+    if verbose and INLET_DIAMETER_M > NOZZLE_DIAMETER_M:
+        print(f"⚠️  入水直徑設定為{INLET_DIAMETER_M*100:.2f}cm，已夾制至噴嘴上限{NOZZLE_DIAMETER_M*100:.2f}cm")
+    return d
 
-# 速度安全檢查
-if INLET_VELOCITY > 0.1:
-    print(f"⚠️  INLET_VELOCITY={INLET_VELOCITY:.3f} > 0.1，自動限制至0.05")
-    INLET_VELOCITY = 0.05
+def recompute_pouring_derived(verbose: bool = False) -> None:
+    """重算與注水相關的派生量（允許於 YAML 覆寫後被呼叫）。"""
+    global INLET_DIAMETER, INLET_AREA, INLET_VELOCITY_BASE, INLET_VELOCITY_PHYS
+    global INLET_VELOCITY_LU, INLET_VELOCITY
+    INLET_DIAMETER = _compute_inlet_diameter(verbose)
+    INLET_AREA = math.pi * (INLET_DIAMETER/2.0)**2
+    INLET_VELOCITY_BASE = POUR_RATE_M3_S / INLET_AREA
+    INLET_VELOCITY_PHYS = INLET_VELOCITY_BASE * (1.0 + GRAVITY_CORRECTION)
+    INLET_VELOCITY_LU = INLET_VELOCITY_PHYS * SCALE_TIME / SCALE_LENGTH
+    INLET_VELOCITY = min(0.05, INLET_VELOCITY_LU)
+    if INLET_VELOCITY > 0.1 and verbose:
+        print(f"⚠️  INLET_VELOCITY={INLET_VELOCITY:.3f} > 0.1，自動限制至0.05")
+
+# 初次計算（之後可被 YAML 覆寫後重算）
+recompute_pouring_derived(verbose=False)
 
 # ==============================================
 # 模擬控制參數

@@ -18,7 +18,7 @@ initialize_taichi_once()
 
 import config.config as config
 
-def test_pressure_mode(mode, steps=50):
+def test_pressure_mode(mode, steps=20):
     """測試特定壓力驅動模式"""
     print(f"\n{'='*60}")
     print(f"🧪 測試模式: {mode.upper()}")
@@ -33,7 +33,8 @@ def test_pressure_mode(mode, steps=50):
     sim = CoffeeSimulation()
     
     print("🔧 設置壓力梯度驅動模式...")
-    setup_pressure_drive(sim, mode)
+    # 僅力驅動模式：避免密度驅動在運行期修改ρ
+    setup_pressure_drive(sim, 'force' if mode != 'none' else 'none')
     
     # 記錄初始狀態
     initial_stats = get_field_statistics_from_sim(sim)

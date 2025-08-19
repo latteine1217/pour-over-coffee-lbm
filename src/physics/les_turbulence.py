@@ -99,6 +99,18 @@ class LESTurbulenceModel:
         
         # 初始化湍流粘度為零
         self.nu_sgs.fill(0.0)
+        # 與測試相容的別名
+        self.nu_t = self.nu_sgs
+        
+        # 可選掩膜與相場參考（用於局部屏蔽與界面抑制）
+        self._mask = None          # ti.field(int32) 1=允許LES, 0=禁用
+        self._phase_field = None   # ti.field(float) 相場（例如φ∈[-1,1]）
+        
+        # 內部預設場：全允許掩膜、無相場（用於不提供時的fallback）
+        self._default_mask = ti.field(dtype=ti.i32, shape=(config.NX, config.NY, config.NZ))
+        self._default_mask.fill(1)
+        self._default_phase = ti.field(dtype=ti.f32, shape=(config.NX, config.NY, config.NZ))
+        self._default_phase.fill(1.0)
     
     @ti.kernel
     def compute_sgs_viscosity(self, u: ti.template(), v: ti.template(), w: ti.template()):
@@ -133,7 +145,7 @@ class LESTurbulenceModel:
             - 記憶體coalesced訪問
             - 減少分支條件
         """
-        for i, j, k in ti.ndrange(1, config.NX-1, 1, config.NY-1, 1, config.NZ-1):
+        for i, j, k in ti.ndrange((1, config.NX-1), (1, config.NY-1), (1, config.NZ-1)):
             # 中心差分計算速度梯度張量
             # ∂u_i/∂x_j
             dudx = (u[i+1, j, k] - u[i-1, j, k]) * 0.5
@@ -297,7 +309,81 @@ class LESTurbulenceModel:
             與LBMSolver.step()方法的標準調用模式兼容，
             確保湍流模型可以無縫整合到現有求解器中。
         """
-        # 提取u_field的分量用於計算
-        # 這是一個簡化版本，用於與現有LBM solver兼容
-        # 在實際實現中，這裡會進行複雜的湍流計算
-        pass  # 簡化實現，避免複雜計算導致錯誤
+        # 從向量速度場直接計算Smagorinsky湍流黏性
+        # 要求：先由LBM更新好 self.u 場
+        mask = self._default_mask if self._mask is None else self._mask
+        phase = self._default_phase if self._phase_field is None else self._phase_field
+        self._compute_sgs_from_vector(u_field, mask, phase)
+
+    @ti.kernel
+    def _compute_sgs_from_vector(self, u_vec: ti.template(),
+                                 mask: ti.template(), phase_field: ti.template()):
+        """
+        基於向量速度場計算局部Smagorinsky湍流黏性 ν_sgs
+        僅計算內部節點，邊界採用零外推（保持0）
+        """
+        for i, j, k in ti.ndrange((1, config.NX-1), (1, config.NY-1), (1, config.NZ-1)):
+            # 多孔域或顯式屏蔽掩膜：禁用LES
+            if mask[i, j, k] == 0:
+                self.nu_sgs[i, j, k] = 0.0
+                continue
+            # 中心差分計算速度梯度
+            u_c = u_vec[i, j, k]
+            u_ip = u_vec[i+1, j, k]; u_im = u_vec[i-1, j, k]
+            u_jp = u_vec[i, j+1, k]; u_jm = u_vec[i, j-1, k]
+            u_kp = u_vec[i, j, k+1]; u_km = u_vec[i, j, k-1]
+
+            dudx = (u_ip.x - u_im.x) * 0.5
+            dudy = (u_jp.x - u_jm.x) * 0.5
+            dudz = (u_kp.x - u_km.x) * 0.5
+
+            dvdx = (u_ip.y - u_im.y) * 0.5
+            dvdy = (u_jp.y - u_jm.y) * 0.5
+            dvdz = (u_kp.y - u_km.y) * 0.5
+
+            dwdx = (u_ip.z - u_im.z) * 0.5
+            dwdy = (u_jp.z - u_jm.z) * 0.5
+            dwdz = (u_kp.z - u_km.z) * 0.5
+
+            # 應變率張量分量
+            S11 = dudx
+            S22 = dvdy
+            S33 = dwdz
+            S12 = 0.5 * (dudy + dvdx)
+            S13 = 0.5 * (dudz + dwdx)
+            S23 = 0.5 * (dvdz + dwdy)
+
+            strain_rate_mag = ti.sqrt(
+                2.0 * (S11*S11 + S22*S22 + S33*S33 + 2.0*(S12*S12 + S13*S13 + S23*S23))
+            )
+            # 低剪切區抑制（避免不必要的ν_sgs）
+            if strain_rate_mag < 1e-3:
+                self.nu_sgs[i, j, k] = 0.0
+                continue
+            # 界面厚區抑制（相場接近界面 |φ|<0.9 時關閉LES）
+            phi = phase_field[i, j, k]
+            if ti.abs(phi) < 0.9:
+                self.nu_sgs[i, j, k] = 0.0
+                continue
+
+            # Smagorinsky模型
+            filter_width = 1.0
+            cs_delta_sqr = (self.cs * filter_width) * (self.cs * filter_width)
+            nu_loc = cs_delta_sqr * strain_rate_mag
+            # 限幅確保穩定
+            max_nu_sgs = 0.1
+            self.nu_sgs[i, j, k] = ti.min(nu_loc, max_nu_sgs)
+
+        # 邊界層：採用零（保守做法）
+        for i, j, k in ti.ndrange(config.NX, config.NY, config.NZ):
+            if i == 0 or j == 0 or k == 0 or i == config.NX-1 or j == config.NY-1 or k == config.NZ-1:
+                self.nu_sgs[i, j, k] = 0.0
+
+    # ===== 可選輸入設定 =====
+    def set_mask(self, mask_field):
+        """設置LES屏蔽掩膜（1=允許，0=禁用）"""
+        self._mask = mask_field
+    
+    def set_phase_field(self, phase_field):
+        """設置相場（用於界面抑制 |φ|<閾值）"""
+        self._phase_field = phase_field

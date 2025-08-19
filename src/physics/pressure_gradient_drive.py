@@ -177,44 +177,20 @@ class PressureGradientDrive:
                     self.pressure_force[i, j, k] = ti.Vector([0.0, 0.0, 0.0])
     
     def apply_force_drive(self):
-        """方法B: 體力場增強的壓力梯度驅動"""
+        """方法B: 體力場增強的壓力梯度驅動（僅累加到body_force）"""
         if self.force_drive_active[None] == 0:
             return
-        
-        # 首先計算壓力梯度 (修復: 分開調用kernel)
+        # 計算壓力梯度對應的加速度場
         self.compute_pressure_gradient()
-        
-        # 然後應用壓力力
-        self._apply_pressure_forces()
+        # 將壓力力（加速度）累加至LBM體力場，由Guo forcing處理
+        self._accumulate_pressure_force_to_body_force()
     
-    @ti.kernel  
-    def _apply_pressure_forces(self):
-        """應用壓力力到LBM求解器中"""
-        # 將壓力力應用到LBM求解器中
+    @ti.kernel
+    def _accumulate_pressure_force_to_body_force(self):
+        """將壓力力（加速度）累加至LBM體力場"""
         for i, j, k in ti.ndrange(config.NX, config.NY, config.NZ):
             if self.lbm.solid[i, j, k] == 0:
-                # 獲取壓力力
-                p_force = self.pressure_force[i, j, k]
-                
-                # 添加到LBM速度場中 (類似重力的實現方式)
-                current_u = self.lbm.u[i, j, k]
-                rho_local = self.lbm.rho[i, j, k]
-                
-                if rho_local > 1e-12:
-                    # 使用與重力相同的積分方法
-                    tau = config.TAU_WATER  # 假設主要是水相
-                    force_term = 0.5 * p_force * tau / rho_local
-                    
-                    # 保守的力限制
-                    max_force_impact = 0.05
-                    force_term_magnitude = force_term.norm()
-                    
-                    if force_term_magnitude > max_force_impact:
-                        force_term = force_term * (max_force_impact / force_term_magnitude)
-                    
-                    # 更新速度
-                    self.lbm.u[i, j, k] = current_u + force_term
-                    self.lbm.u_sq[i, j, k] = self.lbm.u[i, j, k].norm_sqr()
+                self.lbm.body_force[i, j, k] += self.pressure_force[i, j, k]
     
     def apply_mixed_drive(self):
         """階段2: 混合驅動 (微重力 + 壓力梯度)"""
@@ -279,13 +255,31 @@ class PressureGradientDrive:
                     self.lbm.u_sq[i, j, k] = self.lbm.u[i, j, k].norm_sqr()
     
     def apply(self, step: int = 0):
-        """在固定時序中被主控呼叫的純應用函數"""
+        """在固定時序中被主控呼叫的純應用函數（統一走Guo forcing）"""
+        # 僅允許初始化階段執行密度驅動，之後自動關閉
         if self.density_drive_active[None] == 1:
-            self.apply_density_drive()
-        elif self.force_drive_active[None] == 1:
+            if step <= 0:
+                self.apply_density_drive()
+            # 運行期禁用密度驅動
+            self.density_drive_active[None] = 0
+        
+        # 體力場驅動：計算並累加至body_force
+        if self.force_drive_active[None] == 1:
             self.apply_force_drive()
-        elif self.mixed_drive_active[None] == 1:
-            self.apply_mixed_drive()
+            return
+        
+        # 混合驅動：以半強度累加至body_force（無直接改u/ρ）
+        if self.mixed_drive_active[None] == 1:
+            self.compute_pressure_gradient()
+            self._accumulate_mixed_pressure_force()
+            return
+
+    @ti.kernel
+    def _accumulate_mixed_pressure_force(self):
+        """混合驅動：將0.5×壓力力累加至LBM體力場"""
+        for i, j, k in ti.ndrange(config.NX, config.NY, config.NZ):
+            if self.lbm.solid[i, j, k] == 0:
+                self.lbm.body_force[i, j, k] += 0.5 * self.pressure_force[i, j, k]
     
     @ti.kernel
     def compute_statistics(self):

@@ -17,7 +17,15 @@
 - 📊 **即時3D視覺化** - 專業級CFD分析圖表
 - 🆕 **CFD工程師級分析** - 7種專業分析模式
 - 🆕 **智能報告管理** - 時間戳自動目錄結構
-- 🌡️ **熱流耦合系統** - 溫度-流動耦合模擬 (新功能)
+- 🌡️ **熱流耦合系統** - 溫度-流動耦合模擬
+- 🎨 **動態範圍colorbar** - 智能視覺化範圍調整 (最新功能)
+- 📈 **時序參數分析** - 關鍵CFD參數演化追蹤 (最新功能)
+
+### 關鍵數值更新（2025-08）
+- LES-τ_eff 整合：採用 Smagorinsky SGS 黏性以 `τ_eff = τ_mol + 3ν_sgs` 方式直接整合入 BGK 碰撞，避免二次鬆弛，數值更穩定。
+- Guo Forcing 統一外力：重力、壓力梯度、表面張力、濾紙阻力等外力統一累加至 `body_force`，由碰撞核的 Guo forcing 一次性處理，確保守恆與穩定性。
+- 禁用運行期密度驅動：密度場驅動僅允許初始化調整；運行期完全以外力方式推動流動，避免破壞 EOS 與守恆。
+- LES 局域屏蔽：在濾紙多孔域、低剪切區與界面厚區關閉 ν_sgs，自由液相噴流/剪切層保留湍流黏性。
 
 ## 🚀 快速開始
 
@@ -32,6 +40,12 @@ git clone https://github.com/yourusername/pour-over-cfd
 cd pour-over-cfd
 pip install -r requirements.txt
 ```
+
+### 配置要點（YAML）
+- pouring.inlet_diameter_m: 以「米」直接設定入水直徑（預設 0.005 = 0.5 cm 噴嘴）。
+- pouring.pour_rate_ml_s: 注水流量（ml/s）。
+
+說明：系統僅支援 `pouring.inlet_diameter_m` 作為入口幾何設定；舊的 `inlet_diameter_ratio` 已移除，請改用物理直徑鍵以確保可重現與物理一致性。
 
 ### 執行模擬
 ```bash
@@ -236,8 +250,8 @@ pour-over/                                                      # 🏗️ 根目
 ### 📊 視覺化與分析系統 (src/visualization/)
 
 **CFD工程師級科研視覺化**
-- **`enhanced_visualizer.py`** - 科研級增強視覺化系統 (1669行)
-  - 🔬 7種專業CFD分析模式：壓力場、湍流特徵、無量綱數、邊界層、流動拓撲
+- **`enhanced_visualizer.py`** - 科研級增強視覺化系統 (2000+行)
+  - 🔬 **7種專業CFD分析模式**：壓力場、湍流特徵、無量綱數、邊界層、流動拓撲
   - 📈 **壓力場分析**：壓力梯度場、壓力係數分布、損失計算與可視化
   - 🌀 **湍流特徵分析**：Q-準則渦流識別、λ2-準則分析、湍流動能時空分布
   - 📐 **無量綱數分析**：Reynolds、Capillary、Bond、Péclet數即時追蹤與時序圖
@@ -245,6 +259,8 @@ pour-over/                                                      # 🏗️ 根目
   - 🎯 **流動拓撲分析**：臨界點識別、分離線追蹤、渦流結構可視化
   - 🗂️ **智能報告管理**：自動時間戳目錄 `report/{timestamp}/` 結構化輸出
   - 📊 **多物理場綜合分析**：溫度-流動-壓力-相場統一視覺化
+  - 🎨 **動態範圍colorbar** (最新功能)：智能範圍調整，極值排除，統計信息展示
+  - 📈 **時序參數分析** (最新功能)：12個關鍵CFD參數演化追蹤，收斂狀態自動判斷
   
 **專業診斷與監控**
 - **`lbm_diagnostics.py`** - LBM診斷監控系統 (500+行)
@@ -365,22 +381,47 @@ pour-over/                                                      # 🏗️ 根目
 ```
 report/YYYYMMDD_HHMMSS/
 ├── images/                                    # CFD專業分析圖片
-│   ├── cfd_pressure_analysis_step_XXXX.png        # 壓力場分析
+│   ├── cfd_pressure_analysis_step_XXXX.png        # 壓力場分析（動態範圍）
 │   ├── cfd_turbulence_analysis_step_XXXX.png      # 湍流特徵分析
 │   ├── cfd_dimensionless_analysis_step_XXXX.png   # 無量綱數分析
 │   ├── cfd_boundary_layer_analysis_step_XXXX.png  # 邊界層分析
 │   ├── velocity_analysis_step_XXXX.png             # 速度場分析
 │   ├── v60_longitudinal_analysis_step_XXXX.png     # V60縱向分析
-│   └── combined_analysis_step_XXXX.png             # 綜合多物理場
-├── geometry/                                  # 🆕 幾何模型分析
+│   ├── combined_analysis_step_XXXX.png             # 綜合多物理場
+│   └── time_series_analysis_step_XXXX.png          # 🆕 時序參數分析
+├── geometry/                                  # 幾何模型分析
 │   ├── professional_cross_section_analysis.png    # 專業橫截面分析
 │   ├── professional_3d_geometry_model.png         # 3D工程模型
 │   ├── engineering_drawings.png                   # 工程製圖
 │   ├── coffee_particle_distribution.png           # 咖啡顆粒分布分析
 │   └── particle_size_distribution.png             # 顆粒大小分佈分析
-├── data/                                      # 數值數據輸出
+├── data/                                      # 🆕 數值數據輸出
+│   ├── time_series_data_step_XXXX.json            # 時序數據JSON
+│   └── statistics_step_XXXX.json                  # 統計數據
 └── analysis/                                  # 詳細分析報告
 ```
+
+### 🎨 最新增強功能 (2025-08-19)
+
+#### **動態範圍colorbar系統**
+- **智能範圍調整**: 基於5-95%百分位自動調整colorbar範圍
+- **極值處理**: 排除極值干擾，突出數據細節
+- **統計信息**: 自動顯示平均值、標準差、最值等統計數據
+- **視覺優化**: 統一colorbar佈局，專業級圖表格式
+
+#### **時序參數分析系統**
+- **12個關鍵參數追蹤**:
+  - Reynolds數演化
+  - 壓力損失時序
+  - 最大/平均速度變化
+  - 湍流動能演化
+  - 多相流界面面積
+  - 壓力梯度變化
+  - 渦度強度
+  - 質量流率
+- **收斂狀態判斷**: 自動識別數值收斂，解決"多步結果相同"問題
+- **數據持久化**: JSON格式數據輸出，支援後續分析
+- **緩衝區管理**: 智能時序數據管理，防止記憶體溢出
 
 ### 🆕 幾何視覺化功能
 - **V60幾何分析**: 濾杯濾紙完整建模、尺寸驗證、間隙分析

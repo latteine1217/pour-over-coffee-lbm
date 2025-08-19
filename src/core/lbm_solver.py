@@ -87,10 +87,29 @@ class LBMSolver:
             print("🌀 啟用LES湍流建模...")
             self.les_model = LESTurbulenceModel()
             self.use_les = True
+            # 供kernel使用的湍流黏性場引用（若未啟用LES則提供零場）
+            self.les_nu_sgs = self.les_model.nu_sgs
+            # 傳遞相場與LES掩膜（若存在）
+            if hasattr(self, 'phase'):
+                try:
+                    self.les_model.set_phase_field(self.phase)
+                except Exception:
+                    pass
+            # 建立或傳遞LES掩膜場（1允許，0禁用）
+            if not hasattr(self, 'les_mask'):
+                self.les_mask = ti.field(dtype=ti.i32, shape=(config.NX, config.NY, config.NZ))
+                self.les_mask.fill(1)
+            try:
+                self.les_model.set_mask(self.les_mask)
+            except Exception:
+                pass
         else:
             print("📐 使用純LBM (層流假設)...")
             self.les_model = None
             self.use_les = False
+            # 建立零場避免kernel引用失敗
+            self.les_nu_sgs = ti.field(dtype=ti.f32, shape=(config.NX, config.NY, config.NZ))
+            self.les_nu_sgs.fill(0.0)
         
         # 初始化邊界條件管理器
         from src.physics.boundary_conditions import BoundaryConditionManager
@@ -119,6 +138,10 @@ class LBMSolver:
         self._init_distribution_fields()
         self._init_macroscopic_fields()
         self._init_geometry_fields()
+        # LES區域屏蔽掩膜（1=允許LES, 0=禁用LES）
+        if not hasattr(self, 'les_mask'):
+            self.les_mask = ti.field(dtype=ti.i32, shape=(config.NX, config.NY, config.NZ))
+            self.les_mask.fill(1)
         self._init_force_fields()
         self._init_gpu_constants()
         self._init_optimization_cache()
@@ -447,14 +470,23 @@ class LBMSolver:
                 phase_val = self.phase[i, j, k]
                 
                 # 計算體力和鬆弛時間
-                force = self._compute_body_force(phase_val)
-                tau = config.TAU_WATER if phase_val > 0.5 else config.TAU_AIR
-                omega = 1.0 / tau
+                # 合成總體力 = 重力 + 聚合體力場
+                gravity_force = self._compute_body_force(phase_val)
+                force = gravity_force + self.body_force[i, j, k]
+                tau_mol = config.TAU_WATER if phase_val > 0.5 else config.TAU_AIR
+                # LES有效鬆弛時間（τ_eff = τ_mol + 3ν_sgs）
+                tau_eff = tau_mol
+                if self.use_les:
+                    nu_sgs_local = self.les_nu_sgs[i, j, k]
+                    tau_eff = tau_mol + 3.0 * nu_sgs_local
+                # 限幅確保穩定
+                tau_eff = ti.max(0.55, ti.min(1.90, tau_eff))
+                omega = 1.0 / tau_eff
                 
                 # 對每個離散速度方向進行collision-streaming
                 for q in range(config.Q_3D):
                     f_eq = self.equilibrium_3d(i, j, k, q, rho, u)
-                    F_q = self._compute_forcing_term(q, u, force, tau)
+                    F_q = self._compute_forcing_term(q, u, force, tau_eff)
                     f_post = self.f[q, i, j, k] - omega * (self.f[q, i, j, k] - f_eq) + F_q
                     self._perform_streaming(i, j, k, q, f_post)
     
@@ -535,6 +567,12 @@ class LBMSolver:
         """
         for q, i, j, k in ti.ndrange(config.Q_3D, config.NX, config.NY, config.NZ):
             self.f[q, i, j, k], self.f_new[q, i, j, k] = self.f_new[q, i, j, k], self.f[q, i, j, k]
+
+    @ti.kernel
+    def clear_body_force(self):
+        """將聚合體力場清零（每步開始呼叫）"""
+        for i, j, k in ti.ndrange(config.NX, config.NY, config.NZ):
+            self.body_force[i, j, k] = ti.Vector([0.0, 0.0, 0.0])
     
     @ti.func
     def equilibrium_3d(self, i: ti.i32, j: ti.i32, k: ti.i32, q: ti.i32, 

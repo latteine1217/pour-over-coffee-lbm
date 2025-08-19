@@ -16,6 +16,7 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import matplotlib.gridspec as gridspec
 from matplotlib.colors import LinearSegmentedColormap
+from matplotlib.patches import Circle
 from scipy import ndimage
 from scipy.stats import pearsonr
 
@@ -58,6 +59,31 @@ class EnhancedVisualizer:
             'filter_performance': []
         }
         
+        # 時序數據存儲系統
+        self.time_series_data = {
+            'step_numbers': [],
+            'physical_times': [],
+            'reynolds_numbers': [],
+            'pressure_drops': [],
+            'max_velocities': [],
+            'mean_velocities': [],
+            'turbulent_kinetic_energy': [],
+            'interface_area': [],
+            'extraction_efficiency': [],
+            'pressure_gradients': [],
+            'vorticity_magnitude': [],
+            'mass_flow_rates': []
+        }
+        
+        # 視覺化增強參數
+        self.viz_config = {
+            'dynamic_range': True,
+            'percentile_range': (5, 95),
+            'time_series_buffer': 1000,
+            'difference_analysis': True,
+            'adaptive_colorbar': True
+        }
+        
         # 專業配色方案
         self.setup_colormaps()
         
@@ -69,7 +95,282 @@ class EnhancedVisualizer:
         print(f"   └─ 多物理場分析: {'✅' if multiphase else '❌'}")
         print(f"   └─ 顆粒追蹤: {'✅' if particle_system else '❌'}")
         print(f"   └─ 濾紙分析: {'✅' if filter_system else '❌'}")
-    
+
+    def _calculate_dynamic_range(self, data, percentile_low=5, percentile_high=95):
+        """
+        計算動態範圍，排除極值影響，提升視覺化效果
+        
+        Args:
+            data: 數據數組
+            percentile_low: 下限百分位數
+            percentile_high: 上限百分位數
+            
+        Returns:
+            tuple: (vmin, vmax) 動態範圍
+        """
+        # 過濾有效數據（排除NaN和Inf）
+        valid_data = data[np.isfinite(data)]
+        if len(valid_data) == 0:
+            return 0, 1
+        
+        # 使用百分位數確定範圍，排除極值干擾
+        vmin = np.percentile(valid_data, percentile_low)
+        vmax = np.percentile(valid_data, percentile_high)
+        
+        # 確保範圍有效
+        if vmax <= vmin:
+            vmax = vmin + 1e-10
+        
+        return vmin, vmax
+
+    def _create_smart_colorbar(self, ax, im, data, title="", units="", include_stats=True):
+        """
+        創建智能colorbar，包含統計信息和動態範圍
+        
+        Args:
+            ax: matplotlib axes對象
+            im: imshow對象
+            data: 原始數據
+            title: colorbar標題
+            units: 物理單位
+            include_stats: 是否包含統計信息
+            
+        Returns:
+            colorbar對象
+        """
+        cbar = plt.colorbar(im, ax=ax, shrink=0.8)
+        
+        # 設置標籤
+        if units:
+            cbar.set_label(f'{title} [{units}]', fontsize=10)
+        else:
+            cbar.set_label(title, fontsize=10)
+        
+        # 添加統計信息
+        if include_stats:
+            valid_data = data[np.isfinite(data)]
+            if len(valid_data) > 0:
+                mean_val = np.mean(valid_data)
+                std_val = np.std(valid_data)
+                min_val = np.min(valid_data)
+                max_val = np.max(valid_data)
+                
+                # 格式化統計信息
+                if abs(mean_val) > 1000 or abs(mean_val) < 0.01:
+                    stats_text = f'μ={mean_val:.2e}\nσ={std_val:.2e}\nmin={min_val:.2e}\nmax={max_val:.2e}'
+                else:
+                    stats_text = f'μ={mean_val:.3f}\nσ={std_val:.3f}\nmin={min_val:.3f}\nmax={max_val:.3f}'
+                
+                cbar.ax.text(1.05, 0.5, stats_text, 
+                           transform=cbar.ax.transAxes, 
+                           fontsize=8, verticalalignment='center',
+                           bbox=dict(boxstyle="round,pad=0.3", facecolor="lightgray", alpha=0.8))
+        
+        return cbar
+
+    def _collect_time_series_data(self, step_num):
+        """
+        收集關鍵參數的時序數據
+        
+        Args:
+            step_num: 當前時間步數
+        """
+        try:
+            # 計算物理時間
+            physical_time = step_num * config.SCALE_TIME
+            
+            # 收集流體力學特徵
+            flow_chars = self.calculate_flow_characteristics()
+            
+            # 添加到時序數據
+            self.time_series_data['step_numbers'].append(step_num)
+            self.time_series_data['physical_times'].append(physical_time)
+            
+            # Reynolds數
+            reynolds = flow_chars.get('reynolds_number', 0)
+            self.time_series_data['reynolds_numbers'].append(reynolds)
+            
+            # 壓力分析
+            pressure_analysis = flow_chars.get('pressure_analysis', {})
+            pressure_drop = pressure_analysis.get('pressure_drop_total', 0)
+            self.time_series_data['pressure_drops'].append(pressure_drop)
+            
+            # 速度統計
+            if hasattr(self.lbm, 'u'):
+                u_data = self.lbm.u.to_numpy()
+                u_mag = np.sqrt(u_data[:,:,:,0]**2 + u_data[:,:,:,1]**2 + u_data[:,:,:,2]**2)
+                max_vel = np.max(u_mag) * config.SCALE_VELOCITY
+                mean_vel = np.mean(u_mag[u_mag > 1e-6]) * config.SCALE_VELOCITY if np.any(u_mag > 1e-6) else 0
+                
+                self.time_series_data['max_velocities'].append(max_vel)
+                self.time_series_data['mean_velocities'].append(mean_vel)
+            else:
+                self.time_series_data['max_velocities'].append(0)
+                self.time_series_data['mean_velocities'].append(0)
+            
+            # 湍流特徵
+            turbulence_analysis = flow_chars.get('turbulence_analysis', {})
+            tke = turbulence_analysis.get('turbulent_kinetic_energy', 0)
+            self.time_series_data['turbulent_kinetic_energy'].append(tke)
+            
+            # 多相流界面面積
+            if self.multiphase and hasattr(self.multiphase, 'phi'):
+                phi_data = self.multiphase.phi.to_numpy()
+                # 計算界面面積（基於phi梯度）
+                grad_phi = np.gradient(phi_data)
+                interface_area = np.sum(np.sqrt(sum(g**2 for g in grad_phi)))
+                self.time_series_data['interface_area'].append(interface_area)
+            else:
+                self.time_series_data['interface_area'].append(0)
+            
+            # 限制緩衝區大小
+            buffer_size = self.viz_config['time_series_buffer']
+            for key in self.time_series_data:
+                if len(self.time_series_data[key]) > buffer_size:
+                    self.time_series_data[key] = self.time_series_data[key][-buffer_size:]
+                    
+        except Exception as e:
+            print(f"Warning: Time series data collection failed: {e}")
+
+    def save_time_series_analysis(self, step_num):
+        """
+        保存關鍵參數時序分析圖
+        
+        Args:
+            step_num: 當前時間步數
+            
+        Returns:
+            str: 保存的文件路徑
+        """
+        try:
+            # 收集當前步的數據
+            self._collect_time_series_data(step_num)
+            
+            # 檢查是否有足夠的數據
+            if len(self.time_series_data['step_numbers']) < 2:
+                return None
+            
+            # 創建時序分析圖
+            fig, axes = plt.subplots(3, 2, figsize=(16, 12))
+            fig.suptitle(f'關鍵參數時序分析 - Step {step_num}', fontsize=16)
+            
+            steps = self.time_series_data['step_numbers']
+            times = self.time_series_data['physical_times']
+            
+            # 1. Reynolds數演化
+            ax1 = axes[0, 0]
+            reynolds = self.time_series_data['reynolds_numbers']
+            ax1.plot(steps, reynolds, 'b-', linewidth=2, label='Reynolds Number')
+            ax1.set_title('Reynolds數時序演化')
+            ax1.set_ylabel('Re')
+            ax1.grid(True, alpha=0.3)
+            ax1.legend()
+            
+            # 2. 壓力損失時序
+            ax2 = axes[0, 1]
+            pressure_drops = self.time_series_data['pressure_drops']
+            ax2.plot(steps, pressure_drops, 'r-', linewidth=2, label='Pressure Drop')
+            ax2.set_title('壓力損失時序變化')
+            ax2.set_ylabel('ΔP [Pa]')
+            ax2.grid(True, alpha=0.3)
+            ax2.legend()
+            
+            # 3. 速度場統計
+            ax3 = axes[1, 0]
+            max_vels = self.time_series_data['max_velocities']
+            mean_vels = self.time_series_data['mean_velocities']
+            ax3.plot(steps, max_vels, 'g-', linewidth=2, label='Max Velocity')
+            ax3.plot(steps, mean_vels, 'g--', linewidth=2, label='Mean Velocity')
+            ax3.set_title('速度場統計')
+            ax3.set_ylabel('Velocity [m/s]')
+            ax3.grid(True, alpha=0.3)
+            ax3.legend()
+            
+            # 4. 湍流動能
+            ax4 = axes[1, 1]
+            tke = self.time_series_data['turbulent_kinetic_energy']
+            ax4.plot(steps, tke, 'm-', linewidth=2, label='Turbulent Kinetic Energy')
+            ax4.set_title('湍流動能演化')
+            ax4.set_ylabel('TKE [J/kg]')
+            ax4.grid(True, alpha=0.3)
+            ax4.legend()
+            
+            # 5. 多相流界面演化
+            ax5 = axes[2, 0]
+            interface_areas = self.time_series_data['interface_area']
+            ax5.plot(steps, interface_areas, 'c-', linewidth=2, label='Interface Area')
+            ax5.set_title('多相流界面面積')
+            ax5.set_ylabel('Interface Area')
+            ax5.set_xlabel('Time Step')
+            ax5.grid(True, alpha=0.3)
+            ax5.legend()
+            
+            # 6. 系統收斂性分析
+            ax6 = axes[2, 1]
+            if len(reynolds) > 10:
+                # 計算Reynolds數的變化率（數值穩定性指標）
+                re_changes = np.abs(np.diff(reynolds[-10:]))  # 最近10步的變化
+                ax6.plot(steps[-len(re_changes):], re_changes, 'orange', linewidth=2, label='Re Change Rate')
+                ax6.set_title('數值收斂性分析')
+                ax6.set_ylabel('|ΔRe|')
+                ax6.set_xlabel('Time Step')
+                ax6.grid(True, alpha=0.3)
+                ax6.legend()
+                
+                # 添加收斂判斷
+                recent_change = np.mean(re_changes[-5:]) if len(re_changes) >= 5 else float('inf')
+                convergence_threshold = 0.01
+                if recent_change < convergence_threshold:
+                    ax6.text(0.05, 0.95, '✅ 已收斂', transform=ax6.transAxes, 
+                           bbox=dict(boxstyle="round,pad=0.3", facecolor="lightgreen", alpha=0.8))
+                else:
+                    ax6.text(0.05, 0.95, '⏳ 收斂中', transform=ax6.transAxes,
+                           bbox=dict(boxstyle="round,pad=0.3", facecolor="lightyellow", alpha=0.8))
+            
+            plt.tight_layout()
+            
+            # 保存圖像
+            filename = self.get_output_path(f'time_series_analysis_step_{step_num:04d}.png')
+            self._safe_savefig(fig, filename, dpi=200)
+            plt.close()
+            
+            # 同時保存數據到JSON
+            data_filename = self.get_output_path(f'time_series_data_step_{step_num:04d}.json', 'data')
+            with open(data_filename, 'w') as f:
+                # 轉換numpy數組為列表以便JSON序列化
+                json_data = {k: [float(x) for x in v] for k, v in self.time_series_data.items()}
+                json.dump(json_data, f, indent=2)
+            
+            return filename
+            
+        except Exception as e:
+            print(f"Warning: Time series analysis failed: {e}")
+            return None
+
+    def _safe_savefig(self, fig, filename, dpi=200, max_pixels=65000):
+        """安全儲存圖像，動態限制DPI避免超大像素尺寸錯誤。
+
+        - 控制 fig 寬高像素: width_px = width_in * dpi, height_px = height_in * dpi
+        - 限制任一方向像素小於 max_pixels（matplotlib 上限 < 2^16）
+        """
+        try:
+            w_in, h_in = fig.get_size_inches()
+            # 計算可用的最大DPI
+            max_dpi_w = int(max_pixels / max(w_in, 1e-3))
+            max_dpi_h = int(max_pixels / max(h_in, 1e-3))
+            safe_dpi = max(50, min(int(dpi), max_dpi_w, max_dpi_h, 300))  # 下限50, 上限300
+            try:
+                fig.tight_layout()
+            except Exception:
+                pass
+            fig.savefig(filename, dpi=safe_dpi)
+        except Exception as e:
+            print(f"Warning: safe savefig failed ({e}), fallback to low DPI")
+            try:
+                fig.savefig(filename, dpi=100)
+            except Exception as e2:
+                print(f"Warning: fallback savefig failed: {e2}")
+
     def _setup_output_directory(self):
         """設置輸出目錄結構"""
         # 創建時間戳
@@ -107,7 +408,7 @@ class EnhancedVisualizer:
             'coffee', ['#fff8dc', '#3e2723'], N=256)
         
         # 溫度場配色（彩虹系）
-        self.temp_cmap = plt.cm.plasma
+        self.temp_cmap = 'viridis'
     
     def define_analysis_regions(self):
         """定義V60關鍵分析區域"""
@@ -261,8 +562,9 @@ class EnhancedVisualizer:
                 bond_number = 0.0
             
             # Péclet數 (對流vs擴散)
-            if hasattr(config, 'DIFFUSIVITY') and config.DIFFUSIVITY > 0:
-                peclet_number = (u_char * l_char) / config.DIFFUSIVITY
+            diffusivity = getattr(config, 'DIFFUSIVITY', 1e-9)  # 默認擴散係數
+            if diffusivity > 0:
+                peclet_number = (u_char * l_char) / diffusivity
             else:
                 peclet_number = 0.0
             
@@ -729,7 +1031,6 @@ class EnhancedVisualizer:
             lbm_file = self.save_lbm_monitoring_chart(simulation_time, step_num)
             if lbm_file:
                 generated_files.append(lbm_file)
-                print(f"   📊 LBM診斷: {lbm_file}")
         
         # ===== CFD工程師專業分析 =====
         
@@ -737,26 +1038,22 @@ class EnhancedVisualizer:
         pressure_file = self.save_pressure_field_analysis(simulation_time, step_num)
         if pressure_file:
             generated_files.append(pressure_file)
-            print(f"   📊 壓力場分析: {pressure_file}")
         
         # 6. 湍流特徵分析
         turbulence_file = self.save_turbulence_analysis(simulation_time, step_num)
         if turbulence_file:
             generated_files.append(turbulence_file)
-            print(f"   📊 湍流分析: {turbulence_file}")
         
         # 7. 無量綱數時序分析
         dimensionless_file = self.save_dimensionless_analysis(simulation_time, step_num)
         if dimensionless_file:
             generated_files.append(dimensionless_file)
-            print(f"   📊 無量綱分析: {dimensionless_file}")
         
         # 8. 邊界層分析 (每100步生成一次)
         if step_num % 100 == 0:
             boundary_file = self.save_boundary_layer_analysis(simulation_time, step_num)
             if boundary_file:
                 generated_files.append(boundary_file)
-                print(f"   📊 邊界層分析: {boundary_file}")
         
         print(f"✅ CFD工程師級報告生成完成，共 {len(generated_files)} 個文件:")
         for file in generated_files:
@@ -782,39 +1079,58 @@ class EnhancedVisualizer:
                 pressure_lu = rho_data * config.CS2
                 pressure_physical = pressure_lu * config.SCALE_DENSITY * config.SCALE_VELOCITY**2
                 
-                # 1. 壓力場分佈 (XZ切面)
+                # 1. 壓力場分佈 (XZ切面) - 使用動態範圍調整
                 pressure_slice = pressure_physical[:, config.NY//2, :]
+                if self.viz_config['dynamic_range']:
+                    vmin, vmax = self._calculate_dynamic_range(pressure_slice, *self.viz_config['percentile_range'])
+                else:
+                    vmin, vmax = np.min(pressure_slice), np.max(pressure_slice)
+                
                 im1 = ax1.imshow(pressure_slice.T, origin='lower', aspect='auto', 
-                               cmap='RdBu_r', vmin=np.percentile(pressure_slice, 5), 
-                               vmax=np.percentile(pressure_slice, 95))
+                               cmap='RdBu_r', vmin=vmin, vmax=vmax)
                 ax1.set_title('Pressure Field (Pa)', fontsize=12)
                 ax1.set_xlabel('X Position')
                 ax1.set_ylabel('Z Position')
-                plt.colorbar(im1, ax=ax1)
+                self._create_smart_colorbar(ax1, im1, pressure_slice, 'Pressure', 'Pa')
                 self._add_v60_outline_fixed(ax1, 'xz')
                 
-                # 2. 壓力梯度
+                # 2. 壓力梯度 - 使用動態範圍調整
                 if 'pressure_gradient_magnitude' in pressure_analysis:
                     grad_p = pressure_analysis['pressure_gradient_magnitude']
                     grad_slice = grad_p[:, config.NY//2, :]
+                    
+                    if self.viz_config['dynamic_range']:
+                        vmin_grad, vmax_grad = self._calculate_dynamic_range(grad_slice, 0, 95)  # 壓力梯度通常從0開始
+                    else:
+                        vmin_grad, vmax_grad = 0, np.max(grad_slice)
+                    
                     im2 = ax2.imshow(grad_slice.T, origin='lower', aspect='auto', 
-                                   cmap='plasma', vmin=0, vmax=np.percentile(grad_slice, 95))
+                                   cmap='plasma', vmin=vmin_grad, vmax=vmax_grad)
                     ax2.set_title('Pressure Gradient Magnitude (Pa/m)', fontsize=12)
                     ax2.set_xlabel('X Position')
                     ax2.set_ylabel('Z Position')
-                    plt.colorbar(im2, ax=ax2)
+                    self._create_smart_colorbar(ax2, im2, grad_slice, '|∇P|', 'Pa/m')
                     self._add_v60_outline_fixed(ax2, 'xz')
                 
-                # 3. 壓力係數
+                # 3. 壓力係數 - 使用智能範圍
                 if 'pressure_coefficient' in pressure_analysis:
                     cp = pressure_analysis['pressure_coefficient']
                     cp_slice = cp[:, config.NY//2, :]
+                    
+                    if self.viz_config['dynamic_range']:
+                        vmin_cp, vmax_cp = self._calculate_dynamic_range(cp_slice, *self.viz_config['percentile_range'])
+                        # 確保Cp範圍對稱且合理
+                        cp_max = max(abs(vmin_cp), abs(vmax_cp))
+                        vmin_cp, vmax_cp = -cp_max, cp_max
+                    else:
+                        vmin_cp, vmax_cp = -2, 2
+                    
                     im3 = ax3.imshow(cp_slice.T, origin='lower', aspect='auto', 
-                                   cmap='RdBu_r', vmin=-2, vmax=2)
+                                   cmap='RdBu_r', vmin=vmin_cp, vmax=vmax_cp)
                     ax3.set_title('Pressure Coefficient Cp', fontsize=12)
                     ax3.set_xlabel('X Position')
                     ax3.set_ylabel('Z Position')
-                    plt.colorbar(im3, ax=ax3)
+                    self._create_smart_colorbar(ax3, im3, cp_slice, 'Cp', '-')
                     self._add_v60_outline_fixed(ax3, 'xz')
                 
                 # 4. 沿程壓力分佈
@@ -837,7 +1153,7 @@ class EnhancedVisualizer:
             plt.suptitle(f'CFD Pressure Field Analysis (t={physical_time:.2f}s)', fontsize=14)
             filename = self.get_output_path(f'cfd_pressure_analysis_step_{step_num:04d}.png')
             fig.suptitle(f'CFD Pressure Field Analysis - Step {step_num}', fontsize=14)
-            plt.savefig(filename, dpi=300, bbox_inches='tight')
+            self._safe_savefig(fig, filename, dpi=getattr(config, 'VIZ_DPI', 200))
             plt.close()
             
             return filename
@@ -920,7 +1236,7 @@ class EnhancedVisualizer:
             plt.suptitle(f'CFD Turbulence Analysis (t={physical_time:.2f}s)', fontsize=14)
             filename = self.get_output_path(f'cfd_turbulence_analysis_step_{step_num:04d}.png')
             fig.suptitle(f'CFD Turbulence Analysis - Step {step_num}', fontsize=14)
-            plt.savefig(filename, dpi=300, bbox_inches='tight')
+            self._safe_savefig(fig, filename, dpi=getattr(config, 'VIZ_DPI', 200))
             plt.close()
             
             return filename
@@ -1030,7 +1346,11 @@ class EnhancedVisualizer:
             plt.suptitle(f'CFD Dimensionless Analysis (t={physical_time:.2f}s)', fontsize=14)
             filename = self.get_output_path(f'cfd_dimensionless_analysis_step_{step_num:04d}.png')
             fig.suptitle(f'CFD Dimensionless Numbers Analysis - Step {step_num}', fontsize=14)
-            plt.savefig(filename, dpi=300, bbox_inches='tight')
+            # 可關閉重型圖（效能模式）
+            if not getattr(config, 'VIZ_HEAVY', False):
+                plt.close()
+                return None
+            self._safe_savefig(fig, filename, dpi=getattr(config, 'VIZ_DPI', 200))
             plt.close()
             
             return filename
@@ -1115,7 +1435,7 @@ class EnhancedVisualizer:
             plt.suptitle(f'CFD Boundary Layer Analysis (t={physical_time:.2f}s)', fontsize=14)
             filename = self.get_output_path(f'cfd_boundary_layer_analysis_step_{step_num:04d}.png')
             fig.suptitle(f'CFD Boundary Layer Analysis - Step {step_num}', fontsize=14)
-            plt.savefig(filename, dpi=300, bbox_inches='tight')
+            self._safe_savefig(fig, filename, dpi=getattr(config, 'VIZ_DPI', 200))
             plt.close()
             
             return filename
@@ -1259,7 +1579,11 @@ class EnhancedVisualizer:
             
             filename = self.get_output_path(f'v60_longitudinal_analysis_step_{step_num:04d}.png')
             fig.suptitle(f'V60 Longitudinal Analysis - Step {step_num}', fontsize=14)
-            plt.savefig(filename, dpi=300, bbox_inches='tight')
+            # 可關閉重型圖（效能模式）
+            if not getattr(config, 'VIZ_HEAVY', False):
+                plt.close()
+                return None
+            self._safe_savefig(fig, filename, dpi=getattr(config, 'VIZ_DPI', 200))
             plt.close()
             
             return filename
@@ -1304,7 +1628,7 @@ class EnhancedVisualizer:
             
             filename = self.get_output_path(f'velocity_analysis_step_{step_num:04d}.png')
             fig.suptitle(f'Velocity Field Analysis - Step {step_num}', fontsize=14)
-            plt.savefig(filename, dpi=300, bbox_inches='tight')
+            self._safe_savefig(fig, filename, dpi=200)
             plt.close()
             
             return filename
@@ -1372,7 +1696,7 @@ class EnhancedVisualizer:
             plt.suptitle(f'Combined Analysis (t={physical_time:.2f}s)', fontsize=14)
             filename = self.get_output_path(f'combined_analysis_step_{step_num:04d}.png')
             fig.suptitle(f'Combined Multi-Physics Analysis - Step {step_num}', fontsize=14)
-            plt.savefig(filename, dpi=300, bbox_inches='tight')
+            self._safe_savefig(fig, filename, dpi=200)
             plt.close()
             
             return filename
@@ -1433,9 +1757,9 @@ class EnhancedVisualizer:
                 filter_radius = top_radius - filter_gap
                 
                 # 繪製濾紙圓形輪廓（虛線）
-                circle_filter = plt.Circle((center_x, center_y), filter_radius, 
-                                         fill=False, color='gray', linestyle='--', 
-                                         linewidth=1.5, alpha=0.7, label='Filter Paper')
+                circle_filter = Circle((center_x, center_y), filter_radius, 
+                                     fill=False, color='gray', linestyle='--', 
+                                     linewidth=1.5, alpha=0.7, label='Filter Paper')
                 ax.add_patch(circle_filter)
                 
         except Exception as e:
@@ -1485,13 +1809,13 @@ class EnhancedVisualizer:
                 bottom_radius = config.BOTTOM_RADIUS / config.SCALE_LENGTH
                 
                 # 繪製V60頂部圓形輪廓
-                circle_top = plt.Circle((center_x, center_y), top_radius, 
+                circle_top = Circle((center_x, center_y), top_radius, 
                                       fill=False, color='black', linewidth=2, alpha=0.8, label='V60 Top')
                 ax.add_patch(circle_top)
                 
                 # 繪製出水孔
                 hole_radius = bottom_radius / 2
-                circle_hole = plt.Circle((center_x, center_y), hole_radius, 
+                circle_hole = Circle((center_x, center_y), hole_radius, 
                                        fill=False, color='red', linewidth=2, alpha=0.8, label='Outlet Hole')
                 ax.add_patch(circle_hole)
                 
@@ -1555,10 +1879,10 @@ class EnhancedVisualizer:
         生成LBM診斷監控圖表
         """
         try:
-            if not hasattr(self, 'simulation') or not hasattr(self.simulation, 'lbm_diagnostics'):
+            if not hasattr(self, 'simulation') or self.simulation is None or not hasattr(self.simulation, 'lbm_diagnostics'):
                 return None
                 
-            diagnostics = self.simulation.lbm_diagnostics
+            diagnostics = getattr(self.simulation, 'lbm_diagnostics', None)
             if not diagnostics:
                 return None
                 
@@ -1669,7 +1993,7 @@ class EnhancedVisualizer:
             
             filename = self.get_output_path(f'lbm_monitoring_step_{step_num:04d}.png')
             fig.suptitle(f'LBM System Monitoring - Step {step_num}', fontsize=14)
-            plt.savefig(filename, dpi=300, bbox_inches='tight')
+            self._safe_savefig(fig, filename, dpi=200)
             plt.close()
             
             return filename
