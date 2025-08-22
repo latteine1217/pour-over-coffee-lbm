@@ -11,6 +11,11 @@
 - 平時回覆以及註解撰寫：中文
 - 作圖標題、label：英文
 
+## tools使用規則
+- 當需要搜尋文件內容時，在shell中使用"ripgrep" (https://github.com/BurntSushi/ripgrep)指令取代grep指令
+- 當我使用"@"指名文件時，使用read工具閱讀
+- 當需要搜尋文件位置＆名字時，在shell中使用"fd" (https://github.com/sharkdp/fd)指令取代find指令
+
 ## 🔬 專案概述
 工業級3D計算流體力學模擬系統，專門用於V60手沖咖啡沖煮過程的科學模擬。
 專案專注在水流從上方流入濾杯中、與咖啡顆粒的互動，以及從濾紙中流出並從濾杯下方流出的過程。

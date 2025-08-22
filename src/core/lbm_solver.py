@@ -401,6 +401,8 @@ class LBMSolver:
         
         # 第二步：collision + streaming融合
         self._apply_collision_and_streaming()
+        # 交換分布函數緩衝，讓下一步從更新後的 f 開始
+        self.swap_fields()
     
     @ti.kernel
     def _compute_macroscopic_quantities(self):
@@ -433,15 +435,20 @@ class LBMSolver:
                     rho_local += self.f[q, i, j, k]  # SoA訪問模式
                 self.rho[i, j, k] = rho_local
                 
-                # 計算速度 - moment 1
-                u_local = ti.Vector([0.0, 0.0, 0.0])
+                # 計算動量 - moment 1（Guo forcing修正：+0.5F）
+                mom = ti.Vector([0.0, 0.0, 0.0])
                 for q in range(config.Q_3D):
                     e_q = ti.cast(self.e[q], ti.f32)
-                    u_local += self.f[q, i, j, k] * e_q  # SoA訪問模式
+                    mom += self.f[q, i, j, k] * e_q
                 
-                # 正規化速度
+                # Guo修正：u = (Σ f e + 0.5 F) / ρ
+                phase_val = self.phase[i, j, k]
+                gravity_force = self._compute_body_force(phase_val)
+                total_force = gravity_force + self.body_force[i, j, k]
                 if rho_local > 1e-12:
-                    u_local /= rho_local
+                    u_local = (mom + 0.5 * total_force) / rho_local
+                else:
+                    u_local = ti.Vector([0.0, 0.0, 0.0])
                 
                 self.u[i, j, k] = u_local
                 self.u_sq[i, j, k] = u_local.norm_sqr()
@@ -497,12 +504,9 @@ class LBMSolver:
         僅在水相區域應用
         """
         force = ti.Vector([0.0, 0.0, 0.0])
-        if phase_val > 0.01:  # 降低閾值，包含更多水相區域
-            # 使用修正後的重力強度
+        if phase_val > 0.001:  # 進一步降低閾值，確保微量水相也能獲得重力
+            # 使用完整重力強度，移除人工限制
             gravity_strength = config.GRAVITY_LU * phase_val
-            # 保守的重力限制，確保數值穩定性
-            max_gravity = 10.0
-            gravity_strength = ti.min(gravity_strength, max_gravity)
             force = ti.Vector([0.0, 0.0, -gravity_strength])
         return force
     
@@ -516,8 +520,8 @@ class LBMSolver:
         F_q = 0.0
         if force.norm() > 1e-15:
             F_q = self._compute_stable_guo_forcing(q, u, force, tau)
-            # 保守限制forcing項，確保數值穩定性
-            max_forcing = 0.01
+            # 大幅放寬forcing項限制，允許重力充分發揮作用
+            max_forcing = 0.5
             F_q = ti.max(-max_forcing, ti.min(max_forcing, F_q))
         return F_q
     
@@ -651,17 +655,22 @@ class LBMSolver:
         """
         # 準備基本參數
         e_q, w_q, tau_safe = self._prepare_forcing_parameters(q, tau)
-        
-        # 安全檢查輸入
-        force_norm = force.norm()
+
+        # 對過大外力做幅值縮放（而不是整體歸零）
+        # 保持與注水/重力一致的上限等級
+        max_force_norm = 10.0
+        f_norm = force.norm()
+        scale_f = 1.0
+        if f_norm > max_force_norm:
+            scale_f = max_force_norm / f_norm
+        force_safe = force * scale_f
+
+        # 對過大速度做安全夾制（Mach安全）
         u_norm = u.norm()
-        
-        forcing_result = 0.0
-        # 在安全範圍內計算forcing
-        if force_norm <= 10.0 and u_norm <= 0.1:
-            forcing_result = self._calculate_forcing_terms(e_q, w_q, tau_safe, u, force)
-        
-        return forcing_result
+        u_safe = u if u_norm <= 0.2 else u * (0.2 / u_norm)
+
+        # 計算forcing項（幅值最終由上層 _compute_forcing_term 再次限幅）
+        return self._calculate_forcing_terms(e_q, w_q, tau_safe, u_safe, force_safe)
     
     @ti.func
     def _prepare_forcing_parameters(self, q: ti.i32, tau: ti.f32):
@@ -686,13 +695,10 @@ class LBMSolver:
         term1 = config.INV_CS2 * ef
         term2 = config.INV_CS2 * config.INV_CS2 * eu * uf
         
+        # 計算原始forcing值；幅值限制在上層(_compute_forcing_term)統一處理
+        # 重要：不要以過小閾值將結果歸零，否則重力/注水外力會失效
         temp_result = coeff * (term1 + term2)
-        
-        # 最終安全檢查
-        result = 0.0
-        if ti.abs(temp_result) <= 1e-6:
-            result = temp_result
-        return result    
+        return temp_result   
     
     @ti.func
     def _compute_equilibrium(self, q: ti.i32, rho: ti.f32, u: ti.template()) -> ti.f32:
@@ -1440,3 +1446,69 @@ class LBMSolver:
             # 直接從物性計算器的密度場同步到LBM密度場
             # 注意：這個方法僅在properties_calculator存在時調用
             self.rho[i, j, k] = self.properties_calculator.density_field[i, j, k]
+
+    # ======================================================================
+    # Phase 2 強耦合系統 - 顆粒反作用力集成
+    # ======================================================================
+    
+    @ti.kernel
+    def add_particle_reaction_forces(self, particle_system: ti.template()):
+        """將顆粒反作用力加入LBM體力項 - 路線圖核心集成方法"""
+        for i, j, k in ti.ndrange(config.NX, config.NY, config.NZ):
+            if self.solid[i, j, k] == 0:  # 只在流體區域
+                self.body_force[i, j, k] += particle_system.reaction_force_field[i, j, k]
+    
+    def step_with_two_way_coupling(self, particle_system, dt: float, relaxation_factor: float = 0.8):
+        """執行包含完整雙向耦合的LBM時間步 - 路線圖核心方法"""
+        
+        # 1. 清零所有體力場
+        self.clear_body_force()
+        
+        # 2. 顆粒系統雙向耦合計算
+        if particle_system:
+            # 2a. 計算流體→顆粒拖曳力和顆粒→流體反作用力
+            particle_system.compute_two_way_coupling_forces(self.u)
+            
+            # 2b. 應用亞鬆弛穩定化
+            particle_system.apply_under_relaxation(relaxation_factor)
+            
+            # 2c. 將反作用力加入LBM體力項
+            self.add_particle_reaction_forces(particle_system)
+        
+        # 3. LBM核心步驟（含體力項）
+        self.step()
+        
+        # 4. 顆粒物理更新（使用最新的拖曳力）
+        if particle_system:
+            # 這裡需要從顆粒系統獲取邊界信息
+            # particle_system.update_particle_physics_with_forces(dt)
+            pass
+    
+    def get_coupling_diagnostics(self, particle_system=None):
+        """獲取耦合系統診斷信息"""
+        diagnostics = {}
+        
+        # LBM側診斷
+        diagnostics['lbm_step_count'] = getattr(self, 'step_count', 0)
+        diagnostics['body_force_magnitude'] = self._compute_body_force_magnitude()
+        
+        # 顆粒側診斷（如果存在）
+        if particle_system and hasattr(particle_system, 'get_coupling_diagnostics'):
+            particle_diag = particle_system.get_coupling_diagnostics()
+            diagnostics['particle_coupling'] = particle_diag
+        
+        return diagnostics
+    
+    @ti.kernel
+    def _compute_body_force_magnitude(self) -> ti.f32:
+        """計算體力場的平均幅值"""
+        total_magnitude = 0.0
+        count = 0
+        
+        for i, j, k in ti.ndrange(config.NX, config.NY, config.NZ):
+            if self.solid[i, j, k] == 0:
+                magnitude = self.body_force[i, j, k].norm()
+                total_magnitude += magnitude
+                count += 1
+        
+        return total_magnitude / ti.max(1, count)

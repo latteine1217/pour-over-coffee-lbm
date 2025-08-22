@@ -1093,6 +1093,46 @@ class EnhancedVisualizer:
                 ax1.set_ylabel('Z Position')
                 self._create_smart_colorbar(ax1, im1, pressure_slice, 'Pressure', 'Pa')
                 self._add_v60_outline_fixed(ax1, 'xz')
+
+                # Overlay: vertical velocity (uz) vectors on the pressure field
+                try:
+                    uz_slice = u_data[:, config.NY//2, :, 2]  # shape: [NX, NZ]
+                    # Downsample for clarity
+                    stride = max(4, getattr(config, 'VIZ_QUIVER_STRIDE', 6))
+                    X = np.arange(0, uz_slice.shape[0], stride)
+                    Z = np.arange(0, uz_slice.shape[1], stride)
+                    XX, ZZ = np.meshgrid(X, Z, indexing='ij')
+                    Ux = np.zeros_like(XX, dtype=float)
+                    Uz = uz_slice[XX, ZZ]
+                    # Scale arrows for readability
+                    max_uz = np.max(np.abs(Uz)) + 1e-8
+                    scale = getattr(config, 'VIZ_QUIVER_SCALE', 0.1) / max_uz
+                    q = ax1.quiver(XX, ZZ, Ux, Uz, color='k', angles='xy', 
+                                   scale_units='xy', scale=1.0/scale, width=0.002, alpha=0.7)
+                    ax1.set_title('Pressure Field (Pa) + uz vectors', fontsize=12)
+                except Exception:
+                    pass
+
+                # Overlay: phase-field interface contour on the pressure field
+                try:
+                    # Prefer the original phase-field φ in [-1,1]
+                    if self.multiphase is not None and hasattr(self.multiphase, 'phi'):
+                        phase_np = self.multiphase.phi.to_numpy()
+                    elif hasattr(self.lbm, 'phase'):
+                        phase_np = self.lbm.phase.to_numpy()
+                    else:
+                        phase_np = None
+
+                    if phase_np is not None:
+                        phase_slice = phase_np[:, config.NY//2, :]
+                        pmin, pmax = float(np.nanmin(phase_slice)), float(np.nanmax(phase_slice))
+                        # Decide interface level: 0 for [-1,1], 0.5 for [0,1]
+                        level = 0.0 if pmin < 0.0 and pmax > 0.0 else 0.5
+                        CS = ax1.contour(phase_slice.T, levels=[level], colors=['lime'], linewidths=1.2)
+                        # Update title to reflect interface overlay
+                        ax1.set_title('Pressure Field (Pa) + uz vectors + interface', fontsize=12)
+                except Exception:
+                    pass
                 
                 # 2. 壓力梯度 - 使用動態範圍調整
                 if 'pressure_gradient_magnitude' in pressure_analysis:

@@ -256,12 +256,9 @@ class PressureGradientDrive:
     
     def apply(self, step: int = 0):
         """在固定時序中被主控呼叫的純應用函數（統一走Guo forcing）"""
-        # 僅允許初始化階段執行密度驅動，之後自動關閉
+        # 🚀 修正：移除自動關閉限制，讓密度驅動持續工作
         if self.density_drive_active[None] == 1:
-            if step <= 0:
-                self.apply_density_drive()
-            # 運行期禁用密度驅動
-            self.density_drive_active[None] = 0
+            self.apply_density_drive()
         
         # 體力場驅動：計算並累加至body_force
         if self.force_drive_active[None] == 1:

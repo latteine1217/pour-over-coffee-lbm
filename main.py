@@ -317,6 +317,73 @@ class ResultsGenerator:
         print(f"🎉 所有輸出均符合工業級標準！")
         print(f"{'='*width}\n")
 
+class MinimalAdapter:
+    """最小開銷適配器 - 只做必要的統一介面，保持最高性能"""
+    
+    def __init__(self, solver):
+        # 直接暴露求解器
+        self._solver = solver
+        
+        # 統一屬性存取路徑（一次查找，永久使用）
+        if hasattr(solver, 'rho'):
+            # 基礎LBM求解器路徑
+            self.rho = solver.rho
+            self.u = solver.u
+            self.solid = solver.solid
+            self.ux = getattr(solver, 'ux', None)
+            self.uy = getattr(solver, 'uy', None)
+            self.uz = getattr(solver, 'uz', None)
+            self.body_force = solver.body_force
+            self.boundary_manager = solver.boundary_manager
+            self.phase = getattr(solver, 'phase', None)
+            self.f = getattr(solver, 'f', None)
+            self.f_new = getattr(solver, 'f_new', None)
+            self.multiphase = getattr(solver, 'multiphase', None)
+        else:
+            # 熱耦合求解器路徑
+            fs = solver.fluid_solver
+            self.rho = fs.rho
+            self.u = fs.u 
+            self.solid = fs.solid
+            self.ux = getattr(fs, 'ux', None)
+            self.uy = getattr(fs, 'uy', None)
+            self.uz = getattr(fs, 'uz', None)
+            self.body_force = fs.body_force
+            self.boundary_manager = fs.boundary_manager
+            self.phase = getattr(fs, 'phase', None)
+            self.f = getattr(fs, 'f', None)
+            self.f_new = getattr(fs, 'f_new', None)
+            self.multiphase = getattr(fs, 'multiphase', None)
+    
+    # 關鍵方法的直接引用（避免__getattr__開銷）
+    def step(self):
+        if hasattr(self._solver, 'step_ultra_optimized'):
+            return self._solver.step_ultra_optimized()
+        elif hasattr(self._solver, 'step'):
+            return self._solver.step()
+        else:
+            # 熱耦合求解器通常有自己的step
+            return self._solver.step()
+    
+    def clear_body_force(self):
+        if hasattr(self._solver, 'clear_body_force'):
+            return self._solver.clear_body_force()
+        elif hasattr(self._solver, 'fluid_solver') and hasattr(self._solver.fluid_solver, 'clear_body_force'):
+            return self._solver.fluid_solver.clear_body_force()
+        elif self.body_force is not None:
+            self.body_force.fill(0.0)
+    
+    def init_fields(self):
+        if hasattr(self._solver, 'init_fields'):
+            return self._solver.init_fields()
+        elif hasattr(self._solver, 'fluid_solver') and hasattr(self._solver.fluid_solver, 'init_fields'):
+            return self._solver.fluid_solver.init_fields()
+    
+    # 其他屬性/方法通過__getattr__代理（最小使用）
+    def __getattr__(self, name):
+        return getattr(self._solver, name)
+
+
 class CoffeeSimulation:
     def __init__(self, interactive=False, thermal_mode="basic"):
         """
@@ -360,22 +427,27 @@ class CoffeeSimulation:
         print("🔄 初始化FilterPaperSystem...")
         self.filter_paper = FilterPaperSystem(self.lbm)
         
+        # 統一邊界條件初始化（避免重複）
         # 集成濾紙系統到統一邊界條件管理器
-        if hasattr(self.lbm, 'boundary_manager'):
+        if hasattr(self.lbm, 'boundary_manager') and self.lbm.boundary_manager:
             self.lbm.boundary_manager.set_filter_system(self.filter_paper)
             print("✅ 濾紙系統已集成到邊界條件管理器")
+        else:
+            print("   ⚠️  求解器無邊界管理器，濾紙系統獨立運行")
         
         print("🔄 初始化PressureGradientDrive...")
         self.pressure_drive = PressureGradientDrive(self.lbm)
         
-        # 視覺化系統
+        # 統一視覺化系統初始化
+        print("🔧 建立統一視覺化管理...")
         self.visualizer = UnifiedVisualizer(
             self.lbm, 
             self.multiphase, 
             None,  # 不使用geometry模組
             self.particle_system
         )
-        
+        print("統一視覺化系統初始化完成 (3D專用)")
+
         # LBM診斷監控系統
         print("🔧 建立LBM診斷系統...")
         self.diagnostics = LBMDiagnostics(
@@ -386,7 +458,8 @@ class CoffeeSimulation:
             self.filter_paper
         )
         
-        # 增強版視覺化系統（用於高級分析）
+        # 增強版視覺化系統（用於科研級分析）
+        print("🔬 科研級增強視覺化系統初始化...")
         self.enhanced_viz = EnhancedVisualizer(
             self.lbm,
             self.multiphase,
@@ -400,7 +473,8 @@ class CoffeeSimulation:
         created_particles = self._initialize_simulation()
         
         # 初始化結果生成器
-        self.results_generator = ResultsGenerator(self)
+        if not self.results_generator:  # 檢查是否已初始化
+            self.results_generator = ResultsGenerator(self)
         
         # 創建相容性向量速度場
         self._create_compatibility_velocity_field()
@@ -411,19 +485,24 @@ class CoffeeSimulation:
         print(f"   └─ 模式: {thermal_mode}")
     
     def _initialize_solver(self):
-        """根據模式初始化適當的求解器"""
+        """根據模式初始化適當的求解器 - 使用適配器統一介面"""
         if self.thermal_mode == "basic":
-            self.lbm = UltraOptimizedLBMSolver()
-            print("   └─ 使用基礎LBM求解器")
+            raw_solver = UltraOptimizedLBMSolver()
+            self.solver_type = "超級優化LBM"
         elif self.thermal_mode == "thermal":
-            self.lbm = ThermalFluidCoupledSolver()
-            print("   └─ 使用熱流耦合求解器")
+            raw_solver = ThermalFluidCoupledSolver()
+            self.solver_type = "熱流耦合"
         elif self.thermal_mode == "strong_coupled":
-            self.lbm = StrongCoupledSolver()
-            print("   └─ 使用Phase 3強耦合求解器")
+            raw_solver = StrongCoupledSolver()
+            self.solver_type = "Phase 3強耦合"
         else:
             print(f"   ⚠️  未知模式 {self.thermal_mode}，使用基礎LBM")
-            self.lbm = UltraOptimizedLBMSolver()
+            raw_solver = UltraOptimizedLBMSolver()
+            self.solver_type = "基礎LBM (回退)"
+        
+        # 使用最小開銷適配器包裝求解器
+        self.lbm = MinimalAdapter(raw_solver)
+        print(f"   └─ 使用{self.solver_type}求解器 (適配器包裝)")
     
     
     def _initialize_simulation(self):
@@ -473,11 +552,11 @@ class CoffeeSimulation:
         self.filter_paper.initialize_filter_geometry()
         print("   ✅ 濾紙系統初始化完成")
         
+        # === 階段3.5：統一邊界條件初始化 (僅在有邊界管理器時執行) ===
         print("🔧 階段3.5：統一邊界條件初始化...")
-        # === 階段3.5：統一邊界條件初始化 (CFD一致性優化) ===
         try:
-            # 獲取邊界條件管理器 (假設LBM求解器有此屬性)
-            if hasattr(self.lbm, 'boundary_manager'):
+            # 檢查是否有統一邊界條件管理器
+            if hasattr(self.lbm, 'boundary_manager') and self.lbm.boundary_manager:
                 self.lbm.boundary_manager.initialize_all_boundaries(
                     geometry_system=self.filter_paper,  # 幾何系統
                     filter_system=self.filter_paper,    # 濾紙系統
@@ -485,9 +564,13 @@ class CoffeeSimulation:
                 )
                 print("   ✅ 統一邊界條件初始化完成")
             else:
-                print("   ⚠️  求解器無邊界管理器，跳過統一初始化")
+                print("   ⚠️  無統一邊界管理器，使用分別初始化")
+                # 分別處理各個邊界系統
+                if hasattr(self.lbm, 'apply_boundary'):
+                    print("   └─ 使用LBM內建邊界處理")
         except Exception as e:
-            print(f"   ⚠️  邊界條件統一初始化警告: {e}")
+            print(f"   ⚠️  邊界條件統一初始化警告: {str(e)[:50]}...")
+            print("   └─ 繼續使用分別邊界處理")
         
         print("🔧 階段4：顆粒系統初始化...")
         # === 階段4：顆粒系統初始化 ===
@@ -534,13 +617,25 @@ class CoffeeSimulation:
         @ti.kernel
         def sync_kernel():
             for i, j, k in ti.ndrange(config.NX, config.NY, config.NZ):
-                self.u_vector[i, j, k] = ti.Vector([
-                    self.lbm.ux[i, j, k],
-                    self.lbm.uy[i, j, k], 
-                    self.lbm.uz[i, j, k]
-                ])
+                # 安全地獲取速度分量
+                ux_val = 0.0
+                uy_val = 0.0
+                uz_val = 0.0
+                
+                if self.lbm.ux is not None:
+                    ux_val = self.lbm.ux[i, j, k]
+                if self.lbm.uy is not None:
+                    uy_val = self.lbm.uy[i, j, k]
+                if self.lbm.uz is not None:
+                    uz_val = self.lbm.uz[i, j, k]
+                    
+                self.u_vector[i, j, k] = ti.Vector([ux_val, uy_val, uz_val])
         
-        sync_kernel()
+        try:
+            sync_kernel()
+        except:
+            # 如果同步失敗，用零填充
+            self.u_vector.fill(0.0)
     
     def get_velocity_field_for_compatibility(self):
         """獲取向量速度場供其他系統使用"""
@@ -566,30 +661,57 @@ class CoffeeSimulation:
             dt_safe = config.DT         # 穩定後使用全時間步
             dt_coupling = dt_safe
         
-        # 延遲啟動注水系統（避免初期數值衝擊）
-        if self.pouring and self.step_count == 10:  # 改為第10步啟動
-            # 第10步：真正啟動注水
+        # 啟動注水系統（已完成預穩定與多相初始化，無需延遲）
+        if self.pouring and self.step_count == 1:
+            # 步1：啟動注水並以較小的初始流量軟啟動
             self.pouring.start_pouring(pattern='center')
+            try:
+                self.pouring.adjust_flow_rate(0.3)
+            except Exception:
+                pass
             print(f"\n🚿 注水系統啟動 (步驟 {self.step_count})")
             if hasattr(self.pouring, 'get_pouring_info'):
                 info = self.pouring.get_pouring_info()
                 print(f"   └─ 注水狀態: {info}")
-        elif self.pouring and self.step_count > 10:  # 改為第11步及之後
-            # 第11步及之後：持續注水（體力注入版本，與Guo forcing一致）
-            pass  # 具體注水改在清零體力後、碰撞前累加
+        elif self.pouring and 1 < self.step_count <= 10:
+            # 步2-10：線性漸增流量至1.0，避免瞬時衝擊
+            try:
+                rate = 0.3 + (1.0 - 0.3) * (self.step_count - 1) / 9.0
+                self.pouring.adjust_flow_rate(rate)
+            except Exception:
+                pass
         # 清零聚合體力場，並優先累加外力（壓力梯度等）
         if hasattr(self.lbm, 'clear_body_force'):
             self.lbm.clear_body_force()
-        # 注水體力注入：清零後首先累加注水加速度（僅在注水活躍時）
-        if self.pouring and self.step_count > 10:
+        
+        # 注水體力注入：清零後首先累加注水加速度（自步1起）
+        if self.pouring and self.step_count >= 1:
             try:
-                self.pouring.apply_pouring_force(self.lbm.body_force, self.multiphase.phi, dt_safe)
+                # 確保body_force場存在
+                if hasattr(self.lbm, 'body_force'):
+                    self.pouring.apply_pouring_force(self.lbm.body_force, self.multiphase.phi, self.lbm.solid, dt_safe)
+                    # 新增：漸進式相場更新（僅作用於流體格點）
+                    self.pouring.apply_gradual_phase_change(self.multiphase.phi, self.lbm.solid, dt_safe)
             except Exception as _e:
                 if self.step_count % 50 == 0:
-                    print(f"   ⚠️ 注水體力注入失敗: {str(_e)[:60]}")
+                    print(f"   ⚠️ 注水處理失敗: {str(_e)[:60]}")
+        
+        # 壓力驅動力
         if hasattr(self, 'pressure_drive'):
-            # 先累加壓力驅動力，讓碰撞核Guo forcing在本步生效
-            self.pressure_drive.apply(self.step_count)
+            try:
+                # 先累加壓力驅動力，讓碰撞核Guo forcing在本步生效
+                self.pressure_drive.apply(self.step_count)
+            except Exception as _e:
+                if self.step_count % 50 == 0:
+                    print(f"   ⚠️ 壓力驅動失敗: {str(_e)[:60]}")
+
+        # 在碰撞前累加表面張力（參與當步Guo forcing）
+        if self.multiphase and self.step_count > 10:
+            try:
+                self.multiphase.accumulate_surface_tension_pre_collision()
+            except Exception as _e:
+                if self.step_count % 50 == 0:
+                    print(f"   ⚠️ 表面張力累加失敗: {str(_e)[:60]}")
 
         # 固定更新時序（更新）：accumulate_forces → collide → stream → apply_boundary
         if hasattr(self.lbm, 'collide') and hasattr(self.lbm, 'stream'):
@@ -606,7 +728,7 @@ class CoffeeSimulation:
                 self.lbm.step_ultra_optimized()
             elif hasattr(self.lbm, 'step_with_cfl_control'):
                 local_cfl = self.lbm.step_with_cfl_control()
-                if local_cfl > 0.5:
+                if local_cfl and local_cfl > 0.5:
                     print(f"   步驟{self.step_count}: CFL={local_cfl:.3f}")
             elif hasattr(self.lbm, 'step_with_particles'):
                 self.lbm.step_with_particles(self.particle_system)
@@ -615,11 +737,17 @@ class CoffeeSimulation:
             if hasattr(self.lbm, 'apply_boundary'):
                 self.lbm.apply_boundary()
         
-        if self.filter_paper and hasattr(self.filter_paper, 'update_particle_interactions'):
-            self.filter_paper.update_particle_interactions(self.particle_system)
+        # 濾紙系統更新（如果有相關方法）
+        if self.filter_paper and hasattr(self.filter_paper, 'update_flow_through_filter'):
+            try:
+                self.filter_paper.update_flow_through_filter()
+            except Exception as e:
+                if self.step_count % 100 == 0:
+                    print(f"   ⚠️ 濾紙更新失敗: {str(e)[:50]}")
         
         if self.multiphase:
-            self.multiphase.step(self.step_count)
+            # 已在碰撞前累加表面張力，這裡跳過當步再累加
+            self.multiphase.step(self.step_count, precollision_applied=True)
         
         # === LBM診斷監控系統 ===
         simulation_time = self.step_count * config.DT
@@ -639,6 +767,44 @@ class CoffeeSimulation:
             if force_diagnostics and diagnostic_result:
                 lbm_quality = diagnostic_result.get('lbm_quality', {})
                 conservation = diagnostic_result.get('conservation', {})
+                # 精簡CFD狀態摘要（便於快速感知模擬狀況）
+                flow_analysis = diagnostic_result.get('flow_analysis', {}) or {}
+                v60_phys = diagnostic_result.get('v60_physics', {}) or {}
+                multiphase = diagnostic_result.get('multiphase', {}) or {}
+                max_u = flow_analysis.get('max_velocity', 0.0)
+                water_vol_m3 = v60_phys.get('system_water_volume', 0.0)
+                inlet_ml_s = 0.0
+                outlet_ml_s = None
+                try:
+                    if self.pouring and hasattr(self.pouring, 'get_current_flow_rate_ml_s'):
+                        inlet_ml_s = self.pouring.get_current_flow_rate_ml_s()
+                except Exception:
+                    inlet_ml_s = 0.0
+                if 'outlet_flow_rate' in v60_phys:
+                    try:
+                        outlet_ml_s = float(v60_phys['outlet_flow_rate']) * 1e6
+                    except Exception:
+                        outlet_ml_s = None
+                wet_front_cm = None
+                if 'wetting_front_position' in v60_phys:
+                    try:
+                        wet_front_cm = v60_phys['wetting_front_position'] * 100.0
+                    except Exception:
+                        wet_front_cm = None
+                mass_err = conservation.get('relative_mass_error', 0.0)
+                parts = [
+                    f"t={simulation_time*config.SCALE_TIME:.2f}s",
+                    f"max|u|={max_u:.4f} lu",
+                    f"in={inlet_ml_s:.1f} ml/s"
+                ]
+                if outlet_ml_s is not None:
+                    parts.append(f"out={outlet_ml_s:.1f} ml/s")
+                if water_vol_m3:
+                    parts.append(f"Vw={water_vol_m3*1e6:.0f} ml")
+                if wet_front_cm is not None:
+                    parts.append(f"front={wet_front_cm:.1f} cm")
+                parts.append(f"mass_err={mass_err*100:.3f}%")
+                print("   🔎 CFD狀態: " + " | ".join(parts))
                 
                 if lbm_quality.get('lbm_grade') in ['Caution'] or conservation.get('conservation_grade') in ['Moderate']:
                     print(f"   📊 步驟{self.step_count} 診斷: LBM品質={lbm_quality.get('lbm_grade', 'N/A')}, "

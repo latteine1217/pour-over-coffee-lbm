@@ -9,6 +9,7 @@ import taichi as ti
 import numpy as np
 import config.config as config
 import math
+from typing import Dict, Any
 
 @ti.data_oriented
 class CoffeeParticleSystem:
@@ -36,6 +37,23 @@ class CoffeeParticleSystem:
         self.force = ti.Vector.field(3, dtype=ti.f32, shape=max_particles)
         self.settling_velocity = ti.Vector.field(3, dtype=ti.f32, shape=max_particles)
         self.particle_reynolds = ti.field(dtype=ti.f32, shape=max_particles)
+        
+        # 增強物理屬性
+        self.force = ti.Vector.field(3, dtype=ti.f32, shape=max_particles)
+        self.settling_velocity = ti.Vector.field(3, dtype=ti.f32, shape=max_particles)
+        self.particle_reynolds = ti.field(dtype=ti.f32, shape=max_particles)
+        
+        # 雙向耦合屬性 (Phase 2強耦合) - 新增
+        self.drag_coefficient = ti.field(dtype=ti.f32, shape=max_particles)
+        self.fluid_velocity_at_particle = ti.Vector.field(3, dtype=ti.f32, shape=max_particles)
+        self.drag_force = ti.Vector.field(3, dtype=ti.f32, shape=max_particles)
+        
+        # 反作用力場（顆粒→流體）- 新增
+        self.reaction_force_field = ti.Vector.field(3, dtype=ti.f32, shape=(config.NX, config.NY, config.NZ))
+        
+        # 亞鬆弛控制 - 新增
+        self.drag_force_old = ti.Vector.field(3, dtype=ti.f32, shape=max_particles)
+        self.drag_force_new = ti.Vector.field(3, dtype=ti.f32, shape=max_particles)
         
         # 計數器
         self.particle_count = ti.field(dtype=ti.i32, shape=())
@@ -110,6 +128,18 @@ class CoffeeParticleSystem:
             self.mass[i] = 0.0
             self.active[i] = 0
             self.particle_reynolds[i] = 0.0
+            
+            # 雙向耦合字段初始化
+            self.drag_coefficient[i] = 0.0
+            self.fluid_velocity_at_particle[i] = ti.Vector([0.0, 0.0, 0.0])
+            self.drag_force[i] = ti.Vector([0.0, 0.0, 0.0])
+            self.drag_force_old[i] = ti.Vector([0.0, 0.0, 0.0])
+            self.drag_force_new[i] = ti.Vector([0.0, 0.0, 0.0])
+            
+        # 清零反作用力場
+        for i, j, k in ti.ndrange(config.NX, config.NY, config.NZ):
+            self.reaction_force_field[i, j, k] = ti.Vector([0.0, 0.0, 0.0])
+            
         self.particle_count[None] = 0
         self.active_count[None] = 0
         self.boundary_violations[None] = 0
@@ -966,3 +996,251 @@ class CoffeeParticleSystem:
         print(f"   剩餘有效顆粒: {active_count}")
         
         return cleaned_count
+    
+    # ======================================================================
+    # Phase 2 強耦合系統 - 雙向動量傳遞
+    # ======================================================================
+    
+    @ti.func
+    def interpolate_fluid_velocity_trilinear(self, particle_idx: ti.i32, fluid_u: ti.template()) -> ti.template():
+        """三線性插值獲取顆粒位置的流體速度 - P0完整實現"""
+        pos = self.position[particle_idx]
+        
+        # 網格索引計算（確保邊界安全）
+        i = ti.cast(ti.max(0, ti.min(config.NX-2, pos[0])), ti.i32)
+        j = ti.cast(ti.max(0, ti.min(config.NY-2, pos[1])), ti.i32) 
+        k = ti.cast(ti.max(0, ti.min(config.NZ-2, pos[2])), ti.i32)
+        
+        # 插值權重計算
+        fx = pos[0] - ti.cast(i, ti.f32)
+        fy = pos[1] - ti.cast(j, ti.f32)
+        fz = pos[2] - ti.cast(k, ti.f32)
+        
+        # 限制權重在[0,1]範圍內（防護式設計）
+        fx = ti.max(0.0, ti.min(1.0, fx))
+        fy = ti.max(0.0, ti.min(1.0, fy))
+        fz = ti.max(0.0, ti.min(1.0, fz))
+        
+        # 8個節點權重
+        w000 = (1-fx) * (1-fy) * (1-fz)
+        w001 = (1-fx) * (1-fy) * fz
+        w010 = (1-fx) * fy * (1-fz)
+        w011 = (1-fx) * fy * fz
+        w100 = fx * (1-fy) * (1-fz)
+        w101 = fx * (1-fy) * fz
+        w110 = fx * fy * (1-fz)
+        w111 = fx * fy * fz
+        
+        # 三線性插值計算 - 8點插值
+        interpolated_u = (
+            w000 * fluid_u[i, j, k] +
+            w001 * fluid_u[i, j, k+1] +
+            w010 * fluid_u[i, j+1, k] +
+            w011 * fluid_u[i, j+1, k+1] +
+            w100 * fluid_u[i+1, j, k] +
+            w101 * fluid_u[i+1, j, k+1] +
+            w110 * fluid_u[i+1, j+1, k] +
+            w111 * fluid_u[i+1, j+1, k+1]
+        )
+        
+        return interpolated_u
+    
+    @ti.func
+    def distribute_force_to_grid(self, particle_idx: ti.i32, force: ti.template()):
+        """三線性插值分布反作用力到網格 - 路線圖核心算法"""
+        pos = self.position[particle_idx]
+        
+        # 網格索引計算（確保邊界安全）
+        i = ti.cast(ti.max(0, ti.min(config.NX-2, pos[0])), ti.i32)
+        j = ti.cast(ti.max(0, ti.min(config.NY-2, pos[1])), ti.i32) 
+        k = ti.cast(ti.max(0, ti.min(config.NZ-2, pos[2])), ti.i32)
+        
+        # 插值權重計算
+        fx = pos[0] - ti.cast(i, ti.f32)
+        fy = pos[1] - ti.cast(j, ti.f32)
+        fz = pos[2] - ti.cast(k, ti.f32)
+        
+        # 限制權重在[0,1]範圍內
+        fx = ti.max(0.0, ti.min(1.0, fx))
+        fy = ti.max(0.0, ti.min(1.0, fy))
+        fz = ti.max(0.0, ti.min(1.0, fz))
+        
+        # 8個節點權重
+        w000 = (1-fx) * (1-fy) * (1-fz)
+        w001 = (1-fx) * (1-fy) * fz
+        w010 = (1-fx) * fy * (1-fz)
+        w011 = (1-fx) * fy * fz
+        w100 = fx * (1-fy) * (1-fz)
+        w101 = fx * (1-fy) * fz
+        w110 = fx * fy * (1-fz)
+        w111 = fx * fy * fz
+        
+        # 原子操作分布力（防止競爭條件）
+        ti.atomic_add(self.reaction_force_field[i, j, k], w000 * force)
+        ti.atomic_add(self.reaction_force_field[i, j+1, k], w010 * force)
+        ti.atomic_add(self.reaction_force_field[i, j, k+1], w001 * force)
+        ti.atomic_add(self.reaction_force_field[i, j+1, k+1], w011 * force)
+        ti.atomic_add(self.reaction_force_field[i+1, j, k], w100 * force)
+        ti.atomic_add(self.reaction_force_field[i+1, j+1, k], w110 * force)
+        ti.atomic_add(self.reaction_force_field[i+1, j, k+1], w101 * force)
+        ti.atomic_add(self.reaction_force_field[i+1, j+1, k+1], w111 * force)
+    
+    @ti.func
+    def compute_drag_coefficient(self, re_p: ti.f32) -> ti.f32:
+        """Reynolds數依賴拖曳係數 - 路線圖完整版（修正Taichi兼容性）"""
+        cd = 24.0 / ti.max(0.01, re_p)  # 默認Stokes區域
+        
+        if re_p >= 0.1 and re_p < 1000.0:
+            # Schiller-Naumann修正
+            cd = 24.0 / re_p * (1.0 + 0.15 * ti.pow(re_p, 0.687))
+        elif re_p >= 1000.0:
+            cd = 0.44  # 牛頓阻力區域
+            
+        return cd
+    
+    @ti.kernel
+    def clear_reaction_forces(self):
+        """清零反作用力場"""
+        for i, j, k in ti.ndrange(config.NX, config.NY, config.NZ):
+            self.reaction_force_field[i, j, k] = ti.Vector([0.0, 0.0, 0.0])
+    
+    @ti.kernel
+    def compute_two_way_coupling_forces(self, fluid_u: ti.template()):
+        """計算雙向耦合力 - 完整版實現"""
+        # 清零反作用力場
+        for i, j, k in ti.ndrange(config.NX, config.NY, config.NZ):
+            self.reaction_force_field[i, j, k] = ti.Vector([0.0, 0.0, 0.0])
+        
+        # 顆粒循環：計算拖曳力並分布反作用力
+        for p in range(self.max_particles):
+            if self.active[p]:
+                # 1. 插值流體速度到顆粒位置
+                u_fluid = self.interpolate_fluid_velocity_from_field(p, fluid_u)
+                u_rel = u_fluid - self.velocity[p]
+                u_rel_mag = u_rel.norm()
+                
+                # 存儲流體速度用於診斷
+                self.fluid_velocity_at_particle[p] = u_fluid
+                
+                if u_rel_mag > 1e-8:
+                    # 2. 計算顆粒Reynolds數
+                    re_p = (self.water_density * u_rel_mag * 2 * self.radius[p] / 
+                           ti.max(1e-8, self.water_viscosity))
+                    
+                    # 存儲Reynolds數用於診斷
+                    self.particle_reynolds[p] = re_p
+                    
+                    # 3. 計算拖曳力
+                    cd = self.compute_drag_coefficient(re_p)
+                    self.drag_coefficient[p] = cd  # 存儲用於診斷
+                    
+                    area = 3.14159 * self.radius[p] * self.radius[p]
+                    drag_magnitude = 0.5 * self.water_density * cd * area * u_rel_mag
+                    
+                    # 限制最大拖曳力（數值穩定性）
+                    max_drag = self.mass[p] * 100.0  # 100g加速度上限
+                    drag_magnitude = ti.min(drag_magnitude, max_drag)
+                    
+                    # 4. 拖曳力向量
+                    self.drag_force_new[p] = drag_magnitude * u_rel / u_rel_mag
+                    
+                    # 5. 分布反作用力到網格（牛頓第三定律）
+                    reaction_force = -self.drag_force_new[p]
+                    self.distribute_force_to_grid(p, reaction_force)
+                else:
+                    # 相對速度太小，清零力
+                    self.drag_force_new[p] = ti.Vector([0.0, 0.0, 0.0])
+                    self.particle_reynolds[p] = 0.0
+                    self.drag_coefficient[p] = 0.0
+    
+    @ti.func
+    def interpolate_fluid_velocity_from_field(self, particle_idx: ti.i32, fluid_u: ti.template()) -> ti.template():
+        """從給定的流體速度場插值到顆粒位置"""
+        pos = self.position[particle_idx]
+        
+        # 網格索引計算（確保邊界安全）
+        i = ti.cast(ti.max(0, ti.min(config.NX-2, pos[0])), ti.i32)
+        j = ti.cast(ti.max(0, ti.min(config.NY-2, pos[1])), ti.i32) 
+        k = ti.cast(ti.max(0, ti.min(config.NZ-2, pos[2])), ti.i32)
+        
+        # 插值權重計算
+        fx = pos[0] - ti.cast(i, ti.f32)
+        fy = pos[1] - ti.cast(j, ti.f32)
+        fz = pos[2] - ti.cast(k, ti.f32)
+        
+        # 限制權重在[0,1]範圍內
+        fx = ti.max(0.0, ti.min(1.0, fx))
+        fy = ti.max(0.0, ti.min(1.0, fy))
+        fz = ti.max(0.0, ti.min(1.0, fz))
+        
+        # 8個節點權重
+        w000 = (1-fx) * (1-fy) * (1-fz)
+        w001 = (1-fx) * (1-fy) * fz
+        w010 = (1-fx) * fy * (1-fz)
+        w011 = (1-fx) * fy * fz
+        w100 = fx * (1-fy) * (1-fz)
+        w101 = fx * (1-fy) * fz
+        w110 = fx * fy * (1-fz)
+        w111 = fx * fy * fz
+        
+        # 三線性插值計算
+        interpolated_u = (
+            w000 * fluid_u[i, j, k] +
+            w001 * fluid_u[i, j, k+1] +
+            w010 * fluid_u[i, j+1, k] +
+            w011 * fluid_u[i, j+1, k+1] +
+            w100 * fluid_u[i+1, j, k] +
+            w101 * fluid_u[i+1, j, k+1] +
+            w110 * fluid_u[i+1, j+1, k] +
+            w111 * fluid_u[i+1, j+1, k+1]
+        )
+        
+        return interpolated_u
+    
+    @ti.kernel
+    def apply_under_relaxation(self, relaxation_factor: ti.f32):
+        """防止數值震蕩的亞鬆弛技術 - 路線圖核心穩定性算法"""
+        for p in range(self.max_particles):
+            if self.active[p]:
+                # 亞鬆弛公式：F_new = α·F_computed + (1-α)·F_old
+                self.drag_force[p] = (
+                    relaxation_factor * self.drag_force_new[p] + 
+                    (1.0 - relaxation_factor) * self.drag_force_old[p]
+                )
+                
+                # 更新歷史值
+                self.drag_force_old[p] = self.drag_force[p]
+    
+    def get_coupling_diagnostics(self) -> Dict[str, Any]:
+        """獲取雙向耦合診斷信息"""
+        if self.particle_count[None] == 0:
+            return {
+                'active_particles': 0,
+                'avg_reynolds': 0.0,
+                'avg_drag_coeff': 0.0,
+                'max_reaction_force': 0.0,
+                'coupling_quality': 'no_particles'
+            }
+        
+        # 收集診斷數據
+        reynolds_values = []
+        drag_coeffs = []
+        reaction_forces = []
+        
+        for i in range(self.particle_count[None]):
+            if self.active[i] == 1:
+                reynolds_values.append(self.particle_reynolds[i])
+                drag_coeffs.append(self.drag_coefficient[i])
+        
+        # 獲取反作用力場統計
+        reaction_force_data = self.reaction_force_field.to_numpy()
+        max_reaction_force = np.max(np.linalg.norm(reaction_force_data, axis=-1))
+        
+        return {
+            'active_particles': len(reynolds_values),
+            'avg_reynolds': np.mean(reynolds_values) if reynolds_values else 0.0,
+            'max_reynolds': np.max(reynolds_values) if reynolds_values else 0.0,
+            'avg_drag_coeff': np.mean(drag_coeffs) if drag_coeffs else 0.0,
+            'max_reaction_force': float(max_reaction_force),
+            'coupling_quality': 'active' if reynolds_values else 'inactive'
+        }

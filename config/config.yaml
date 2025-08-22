@@ -2,9 +2,9 @@
 
 simulation:
   mode: basic              # basic | thermal | strong_coupled
-  max_steps: 500           # total steps for main runs
+  max_steps: 1000           # total steps for main runs
   debug_steps: 20          # steps for debug runs
-  pressure_mode: none      # none | force | mixed
+  pressure_mode: density    # none | force | mixed | density
   output_freq: 500         # output frequency
   interactive: false       # disable interactive prompts
   save_output: true        # save intermediate results

@@ -5,38 +5,26 @@ D3Q19 LBM模擬初始化模組
 """
 
 import taichi as ti
-import config
+import config.config as config
 import time
-
-# Apple Silicon 優化支援
-try:
-    from apple_silicon_optimizations import apply_apple_silicon_optimizations
-    APPLE_SILICON_AVAILABLE = True
-except ImportError:
-    APPLE_SILICON_AVAILABLE = False
 
 # 全域變數追蹤初始化狀態
 _taichi_initialized = False
 
 def initialize_taichi_once():
-    """統一的Taichi初始化函數 - 避免重複初始化"""
+    """統一的Taichi初始化函數 - 智能後端選擇與避免重複初始化"""
     global _taichi_initialized
     
     if _taichi_initialized:
         print("✓ Taichi已初始化，跳過重複初始化")
         return
     
-    # 檢查環境變數，支援CI環境
+    # 檢查環境變數
     import os
+    import platform
     forced_cpu = os.environ.get('CI', 'false').lower() == 'true' or os.environ.get('TI_ARCH', '') == 'cpu'
+    system = platform.system().lower()
     
-    # 🍎 Apple Silicon 優化前置設置
-    apple_config = None
-    if APPLE_SILICON_AVAILABLE and not forced_cpu:
-        print("🚀 檢測到 Apple Silicon，啟用專用優化...")
-        apple_config = apply_apple_silicon_optimizations()
-    
-    # NVIDIA P100 * 2 優化設置，優先使用CUDA
     try:
         if forced_cpu:
             # CI環境或強制CPU
@@ -44,53 +32,84 @@ def initialize_taichi_once():
                 arch=ti.cpu, 
                 kernel_profiler=False,
                 offline_cache=True,
-                cpu_max_num_threads=4,  # CI環境限制線程數
+                cpu_max_num_threads=4,
                 debug=False
             )
             print("✓ 使用CPU計算 (CI環境)")
             _taichi_initialized = True
-        else:
-            # NVIDIA P100 * 2 (16GB each) 優化配置
-            init_args = {
-                'arch': ti.cuda,               # 優先CUDA for NVIDIA GPUs
-                'device_memory_GB': 15.0,      # P100 16GB per GPU, leave 1GB for system
-                'fast_math': True,             # 快速數學運算
-                'advanced_optimization': True, # 進階編譯優化
-                'cpu_max_num_threads': 16,     # 增加CPU線程以匹配雙GPU設置
-                'debug': False,                # 關閉除錯提升性能
-                'kernel_profiler': False,      # 禁用內核性能分析
-                'offline_cache': True,         # CUDA支援離線快取
+        elif system == 'darwin':  # macOS
+            # 🍎 Apple Silicon 優化配置
+            print("🍎 檢測到 macOS 環境")
+            
+            # 檢測Apple Silicon vs Intel
+            import subprocess
+            try:
+                result = subprocess.run(['sysctl', '-n', 'machdep.cpu.brand_string'], 
+                                      capture_output=True, text=True)
+                cpu_info = result.stdout.strip()
+                is_apple_silicon = 'Apple' in cpu_info
+            except:
+                is_apple_silicon = False
+            
+            if is_apple_silicon:
+                # Apple Silicon優化配置
+                init_args = {
+                    'arch': ti.metal,
+                    'device_memory_fraction': 0.75,  # 使用75%GPU記憶體
+                    'fast_math': True,
+                    'advanced_optimization': True,
+                    'cpu_max_num_threads': 8,
+                    'debug': False,
+                    'kernel_profiler': False,
+                    'offline_cache': True,
+                }
+                ti.init(**init_args)
+                print(f"🍎 檢測到 Apple Silicon ({cpu_info.split()[-1]})")
+                print("✓ 使用Metal GPU計算 (Apple Silicon優化)")
+            else:
+                # Intel Mac回退到OpenGL
+                ti.init(arch=ti.opengl, debug=False, offline_cache=True)
+                print("✓ 使用OpenGL計算 (Intel Mac)")
+            _taichi_initialized = True
+            
+        else:  # Linux/Windows
+            # NVIDIA CUDA優化配置
+            print("🔥 檢測到 Linux/Windows 環境，嘗試CUDA")
+            
+            cuda_init_args = {
+                'arch': ti.cuda,
+                'device_memory_GB': 15.0,
+                'fast_math': True,
+                'advanced_optimization': True,
+                'cpu_max_num_threads': 16,
+                'debug': False,
+                'kernel_profiler': False,
+                'offline_cache': True,
             }
             
-            # 嘗試CUDA初始化
             try:
-                ti.init(**init_args)
-                print("✓ 使用NVIDIA CUDA計算 (P100 * 2 優化)")
-                print(f"🚀 GPU記憶體: {init_args['device_memory_GB']}GB per GPU")
-                print(f"⚡ CUDA統一記憶體已啟用")
+                ti.init(**cuda_init_args)
+                print("✓ 使用NVIDIA CUDA計算")
+                print(f"🚀 GPU記憶體: {cuda_init_args['device_memory_GB']}GB")
                 _taichi_initialized = True
             except Exception as cuda_error:
-                print(f"⚠️ CUDA初始化失敗: {cuda_error}")
-                # 回退到Metal (如果在macOS) 或 OpenGL
+                print(f"⚠️ CUDA不可用: {str(cuda_error)[:50]}...")
+                # 回退到OpenGL
                 try:
-                    init_args['arch'] = ti.opengl
-                    init_args.pop('cuda_stack_limit', None)
-                    init_args.pop('cuda_enable_unified_memory', None)
-                    ti.init(**init_args)
+                    ti.init(arch=ti.opengl, debug=False, offline_cache=True)
                     print("✓ 使用OpenGL計算 (CUDA回退)")
                     _taichi_initialized = True
-                except:
-                    raise cuda_error
-    except:
-        # GPU初始化失敗時回落到CPU
-        ti.init(
-            arch=ti.cpu, 
-            kernel_profiler=False,
-            offline_cache=True,
-            cpu_max_num_threads=4,
-            debug=False
-        )
-        print("✓ 使用CPU計算 (GPU不可用)")
+                except Exception as opengl_error:
+                    print(f"⚠️ OpenGL失敗: {str(opengl_error)[:50]}...")
+                    # 最終回退到CPU
+                    ti.init(arch=ti.cpu, debug=False, offline_cache=True)
+                    print("✓ 使用CPU計算 (最終回退)")
+                    _taichi_initialized = True
+    except Exception as e:
+        # 最終安全回退
+        print(f"⚠️ 所有GPU初始化失敗: {str(e)[:50]}...")
+        ti.init(arch=ti.cpu, debug=False, offline_cache=True)
+        print("✓ 使用CPU計算 (安全回退)")
         _taichi_initialized = True
 
 # 模組載入時進行初始化

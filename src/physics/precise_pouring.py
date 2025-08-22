@@ -68,7 +68,8 @@ class PrecisePouringSystem:
             self.spiral_radius[None] = 5.0      # 初始螺旋半徑
             self.spiral_speed[None] = 1.0       # 螺旋速度
         
-        print(f"開始注水: 位置({center_x:.1f}, {center_y:.1f}), 模式: {pattern}")
+        print(f"開始注水: 位置({center_x:.1f}, {center_y:.1f}), 高度: {self.POUR_HEIGHT}, 模式: {pattern}")
+        print(f"注水參數: 直徑={self.POUR_DIAMETER_GRID:.2f}格, 速度={self.POUR_VELOCITY:.3f}lu/ts")
     
     def stop_pouring(self):
         """停止注水"""
@@ -99,12 +100,12 @@ class PrecisePouringSystem:
                 
                 # 只在水流噴嘴附近的小範圍內施加影響 (3-4格的垂直範圍)
                 pour_stream_height = 4.0  # 水流噴嘴影響的垂直高度
-                if distance_to_pour <= pour_radius and k >= pour_z and k <= pour_z + pour_stream_height:
+                if distance_to_pour <= pour_radius and k <= pour_z and k >= pour_z - pour_stream_height:
                     # 高斯分佈的水流強度 (中心最強)
                     intensity = ti.exp(-0.5 * (distance_to_pour / pour_radius)**2)
                     
-                    # 垂直距離衰減 (離噴嘴越遠強度越低)
-                    vertical_distance = k - pour_z
+                    # 垂直距離衰減 (從噴嘴向下，距離越遠強度越低)
+                    vertical_distance = pour_z - k  # 修正：從上往下的距離
                     vertical_decay = ti.exp(-vertical_distance / 2.0)
                     total_intensity = intensity * vertical_decay
                     
@@ -151,12 +152,12 @@ class PrecisePouringSystem:
                 
                 # 只在水流噴嘴附近的小範圍內施加影響 (3-4格的垂直範圍)
                 pour_stream_height = 4.0  # 水流噴嘴影響的垂直高度
-                if distance_to_pour <= pour_radius and k >= pour_z and k <= pour_z + pour_stream_height:
+                if distance_to_pour <= pour_radius and k <= pour_z and k >= pour_z - pour_stream_height:
                     # 高斯分佈的水流強度 (中心最強)
                     intensity = ti.exp(-0.5 * (distance_to_pour / pour_radius)**2)
                     
-                    # 垂直距離衰減 (離噴嘴越遠強度越低)
-                    vertical_distance = k - pour_z
+                    # 垂直距離衰減 (從噴嘴向下，距離越遠強度越低)
+                    vertical_distance = pour_z - k  # 修正：從上往下的距離
                     vertical_decay = ti.exp(-vertical_distance / 2.0)
                     total_intensity = intensity * vertical_decay
                     
@@ -184,7 +185,7 @@ class PrecisePouringSystem:
 
     @ti.kernel
     def apply_pouring_force(self, lbm_body_force: ti.template(), 
-                            multiphase_phi: ti.template(), dt: ti.f32):
+                            multiphase_phi: ti.template(), solid: ti.template(), dt: ti.f32):
         """以體力注入的方式施加注水（配合Guo forcing）
 
         - 僅在噴嘴附近区域施加向下的加速度，避免被SoA巨觀量重算覆寫
@@ -209,10 +210,10 @@ class PrecisePouringSystem:
 
                 # 噴嘴下方3-4格範圍
                 pour_stream_height = 4.0
-                if distance_to_pour <= pour_radius and k >= pour_z and k <= pour_z + pour_stream_height:
+                if distance_to_pour <= pour_radius and k <= pour_z and k >= pour_z - pour_stream_height and solid[i, j, k] == 0:
                     # 高斯徑向分佈 + 指數式垂直衰減
                     intensity = ti.exp(-0.5 * (distance_to_pour / pour_radius)**2)
-                    vertical_distance = k - pour_z
+                    vertical_distance = pour_z - k  # 修正：從上往下的距離
                     vertical_decay = ti.exp(-vertical_distance / 2.0)
                     total_intensity = intensity * vertical_decay
 
@@ -331,6 +332,29 @@ class PrecisePouringSystem:
             'conditions_check': self._check_pouring_conditions()
         }
         return diagnostics
+
+    def get_current_flow_rate(self) -> float:
+        """回傳當前注水體積流率（格子單位 lu^3/ts）
+
+        - 以噴嘴截面積（物理）換算為格子單位面積，再乘以格子速度
+        - 乘上當前 `flow_rate` 作為比例因子
+        """
+        try:
+            if self.pouring_active[None] == 0:
+                return 0.0
+            area_lu2 = config.INLET_AREA / (config.SCALE_LENGTH ** 2)
+            u_lu = config.INLET_VELOCITY
+            return float(self.pour_flow_rate[None] * u_lu * area_lu2)
+        except Exception:
+            return 0.0
+
+    def get_current_flow_rate_ml_s(self) -> float:
+        """回傳當前注水體積流率（ml/s）"""
+        try:
+            # 基礎流率（ml/s）乘上 flow_rate 作為比例
+            return float(config.POUR_RATE_ML_S * max(0.0, self.pour_flow_rate[None]))
+        except Exception:
+            return 0.0
     
     def _check_pouring_conditions(self):
         """檢查注水條件的有效性"""
@@ -357,7 +381,7 @@ class PrecisePouringSystem:
                     dy = j - center_y
                     distance_to_pour = (dx*dx + dy*dy)**0.5
                     
-                    if distance_to_pour <= pour_radius and k >= pour_z and k <= pour_z + pour_stream_height:
+                if distance_to_pour <= pour_radius and k <= pour_z and k >= pour_z - pour_stream_height:
                         affected_cells += 1
         
         return {
@@ -452,3 +476,43 @@ class PrecisePouringSystem:
         self.pour_center_x[None] = max(5, min(config.NX-5, new_x))
         self.pour_center_y[None] = max(5, min(config.NY-5, new_y))
         print(f"移動注水位置: ({self.pour_center_x[None]:.1f}, {self.pour_center_y[None]:.1f})")
+
+    @ti.kernel
+    def apply_gradual_phase_change(self, multiphase_phi: ti.template(), solid: ti.template(), dt: ti.f32):
+        """漸進式相場變化，適用於所有注水函數"""
+        if self.pouring_active[None] == 1:
+            pour_x, pour_y = self._get_current_pour_position()
+            pour_radius = self.POUR_DIAMETER_GRID / 2.0
+            pour_z = self.POUR_HEIGHT
+            pour_stream_height = 4.0
+            
+            for i, j, k in ti.ndrange(config.NX, config.NY, config.NZ):
+                dx = i - pour_x
+                dy = j - pour_y
+                distance_to_pour = ti.sqrt(dx*dx + dy*dy)
+                
+                if distance_to_pour <= pour_radius and k <= pour_z and k >= pour_z - pour_stream_height and solid[i, j, k] == 0:
+                    # 計算強度
+                    intensity = ti.exp(-0.5 * (distance_to_pour / pour_radius)**2)
+                    vertical_distance = pour_z - k
+                    vertical_decay = ti.exp(-vertical_distance / 2.0)
+                    total_intensity = intensity * vertical_decay
+                    
+                    # 漸進式相場設置
+                    target_phi = 1.0  # 目標：純水相
+                    current_phi = multiphase_phi[i, j, k]
+                    
+                    # 使用時間常數控制相場變化速率
+                    tau_phase = 0.05  # 相場變化時間常數
+                    change_rate = (target_phi - current_phi) / tau_phase
+                    
+                    # 限制最大變化率，避免數值震盪
+                    max_change_per_dt = 2.0
+                    change_rate = ti.max(-max_change_per_dt, ti.min(max_change_per_dt, change_rate))
+                    
+                    # 考慮注水強度的影響
+                    phase_change = change_rate * total_intensity * dt * self.pour_flow_rate[None]
+                    new_phi = current_phi + phase_change
+                    
+                    # 確保相場在物理範圍內
+                    multiphase_phi[i, j, k] = ti.max(-1.0, ti.min(1.0, new_phi))

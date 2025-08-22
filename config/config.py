@@ -128,7 +128,7 @@ RHO_AIR = AIR_DENSITY_20C / WATER_DENSITY_90C  # 真實密度比
 # 重力轉換 (優化CFD流動速度 - 15%強度設定)
 GRAVITY_PHYS = 9.81                    # m/s²
 GRAVITY_LU_FULL = GRAVITY_PHYS * (SCALE_TIME**2) / SCALE_LENGTH  # 完整重力: ~61.34
-GRAVITY_STRENGTH_FACTOR = 0.15         # 15%重力強度，優化流動速度同時保持數值穩定性
+GRAVITY_STRENGTH_FACTOR = 0.5          # 50%重力強度，增強流動驅動力，平衡穩定性與物理效果
 GRAVITY_LU = GRAVITY_LU_FULL * GRAVITY_STRENGTH_FACTOR  # 實際使用重力: ~9.20
 
 # 表面張力係數

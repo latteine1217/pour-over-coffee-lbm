@@ -222,6 +222,14 @@ class OutletBoundary(BoundaryConditionBase):
                 ux[i, config.NY-1, k] = ux[i, config.NY-2, k]
                 uy[i, config.NY-1, k] = uy[i, config.NY-2, k]
                 uz[i, config.NY-1, k] = uz[i, config.NY-2, k]
+        
+        # 🚀 關鍵修正：Z方向底部出口邊界（V60濾杯出口）
+        for i, j in ti.ndrange(config.NX, config.NY):
+            if solid[i, j, 0] == 0:  # 底部出口
+                rho[i, j, 0] = rho[i, j, 1]  # 外推密度
+                ux[i, j, 0] = ux[i, j, 1]    # 外推速度
+                uy[i, j, 0] = uy[i, j, 1]
+                uz[i, j, 0] = ti.max(uz[i, j, 1], -0.1)  # 確保向下流動
     
     @ti.kernel
     def _apply_outlet_vector_kernel(self, solid: ti.template(), rho: ti.template(), u: ti.template()):
@@ -231,7 +239,7 @@ class OutletBoundary(BoundaryConditionBase):
             if solid[0, j, k] == 0:  # 左邊界
                 rho[0, j, k] = rho[1, j, k]
                 u[0, j, k] = u[1, j, k]
-                    
+                
             if solid[config.NX-1, j, k] == 0:  # 右邊界
                 rho[config.NX-1, j, k] = rho[config.NX-2, j, k]
                 u[config.NX-1, j, k] = u[config.NX-2, j, k]
@@ -245,6 +253,12 @@ class OutletBoundary(BoundaryConditionBase):
             if solid[i, config.NY-1, k] == 0:  # 後邊界
                 rho[i, config.NY-1, k] = rho[i, config.NY-2, k]
                 u[i, config.NY-1, k] = u[i, config.NY-2, k]
+        
+        # 🚀 關鍵修正：Z方向底部出口邊界（V60濾杯出口）
+        for i, j in ti.ndrange(config.NX, config.NY):
+            if solid[i, j, 0] == 0:  # 底部出口
+                rho[i, j, 0] = rho[i, j, 1]  # 外推密度
+                u[i, j, 0] = u[i, j, 1]      # 外推速度向量
 
 @ti.data_oriented
 class TopBoundary(BoundaryConditionBase):

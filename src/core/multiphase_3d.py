@@ -215,7 +215,7 @@ class MultiphaseFlow3D:
     
     @ti.kernel
     def apply_boundary_conditions(self):
-        """應用相場的邊界條件"""
+        """應用相場的邊界條件 - 增強版"""
         # 處理域邊界
         for j, k in ti.ndrange(config.NY, config.NZ):
             # x方向邊界：零梯度
@@ -231,6 +231,17 @@ class MultiphaseFlow3D:
             # z方向邊界：零梯度
             self.phi_new[i, j, 0] = self.phi_new[i, j, 1]
             self.phi_new[i, j, config.NZ-1] = self.phi_new[i, j, config.NZ-2]
+            
+        # 全域相場範圍檢查和修正
+        for i, j, k in ti.ndrange(config.NX, config.NY, config.NZ):
+            # 確保相場在物理範圍內
+            self.phi_new[i, j, k] = ti.max(-1.0, ti.min(1.0, self.phi_new[i, j, k]))
+            
+            # 在固體邊界處的相場處理
+            if hasattr(self.lbm, 'solid') and self.lbm.solid[i, j, k] == 1:
+                # 固體表面的相場根據濕潤性設置
+                # 這裡假設V60表面中性濕潤
+                self.phi_new[i, j, k] = 0.0  # 中性相場值
     
     def step(self):
         """執行一個多相流時間步"""
@@ -353,21 +364,21 @@ class MultiphaseFlow3D:
     
     @ti.kernel
     def update_density_from_phase(self):
-        """根據相場更新密度場 - 並行處理"""
+        """根據相場更新密度場 - 修正版本"""
         for i, j, k in ti.ndrange(config.NX, config.NY, config.NZ):
             phi_local = self.phi[i, j, k]
             
-            # 密度隨相場線性插值
-            self.lbm.rho[i, j, k] = (config.RHO_WATER * (1.0 + phi_local) + 
-                                   config.RHO_AIR * (1.0 - phi_local)) * 0.5
+            # 確保相場在合理範圍內
+            phi_local = ti.max(-1.0, ti.min(1.0, phi_local))
             
-            # 更新相標記
-            if phi_local > 0.1:
-                self.lbm.phase[i, j, k] = config.PHASE_WATER
-            elif phi_local < -0.1:
-                self.lbm.phase[i, j, k] = config.PHASE_AIR
-            else:
-                self.lbm.phase[i, j, k] = (phi_local + 1.0) * 0.5
+            # 正確的線性插值: ρ = ρ_air + (ρ_water - ρ_air) * (φ + 1) / 2
+            # φ=-1(氣相) → ρ=ρ_air, φ=+1(水相) → ρ=ρ_water
+            density = config.RHO_AIR + (config.RHO_WATER - config.RHO_AIR) * (phi_local + 1.0) / 2.0
+            self.lbm.rho[i, j, k] = density
+            
+            # 簡化相場標記，直接使用歸一化的φ值 [0, 1]範圍
+            phase_normalized = (phi_local + 1.0) / 2.0
+            self.lbm.phase[i, j, k] = phase_normalized
     
     @ti.kernel
     def copy_phase_field(self):
@@ -375,20 +386,32 @@ class MultiphaseFlow3D:
         for i, j, k in ti.ndrange(config.NX, config.NY, config.NZ):
             self.phi[i, j, k] = self.phi_new[i, j, k]
     
-    def step(self, step_count=0):
-        """執行多相流一個時間步長 - 完整並行流水線"""
+    def step(self, step_count=0, precollision_applied: bool = False):
+        """執行多相流一個時間步長 - 完整並行流水線
+
+        Args:
+            step_count: 當前步數，用於延遲啟動表面張力
+            precollision_applied: 若當步已在碰撞前累加表面張力，這裡就不再重複累加
+        """
         self.compute_gradients()
         self.compute_curvature()
         self.compute_surface_tension_force()
         
         # 延遲啟動表面張力效果，避免初始化時的數值不穩定
-        if step_count > 10:  # 前10步不施加表面張力
+        if (not precollision_applied) and step_count > 10:
             self.apply_surface_tension()
         
         self.update_phase_field_cahn_hilliard()
         self.apply_phase_separation()
         self.copy_phase_field()
         self.update_density_from_phase()
+
+    def accumulate_surface_tension_pre_collision(self):
+        """在碰撞前累加表面張力到 LBM 體力場（參與當步Guo forcing）"""
+        self.compute_gradients()
+        self.compute_curvature()
+        self.compute_surface_tension_force()
+        self.apply_surface_tension()
     
     # ====================
     # 初始狀態標準化系統 (CFD一致性優化)

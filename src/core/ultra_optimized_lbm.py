@@ -33,14 +33,6 @@ class UltraOptimizedLBMSolver:
         print("🚀 初始化超級優化版LBM求解器...")
         print("   採用真正SoA布局 + Apple Silicon深度優化")
         
-        # 確保Taichi已初始化
-        try:
-            # 測試是否已初始化
-            test_field = ti.field(dtype=ti.f32, shape=1)
-        except:
-            # 如果失败則初始化
-            ti.init(arch=ti.metal)
-        
         # 檢測並應用Apple Silicon配置
         self.apple_config = apple_optimizer.setup_taichi_metal_optimization()
         
@@ -59,22 +51,30 @@ class UltraOptimizedLBMSolver:
         # 初始化LES湍流（條件）
         if config.ENABLE_LES and config.RE_CHAR > config.LES_REYNOLDS_THRESHOLD:
             print("🌀 啟用LES湍流建模 (Ultra)...")
-            self.les_model = LESTurbulenceModel()
-            self.use_les = True
-            # 供kernel使用：引用湍流黏性場
-            self.nu_sgs = self.les_model.nu_sgs
-            # LES掩膜：預設全允許，供濾紙/咖啡床禁用
-            self.les_mask = ti.field(dtype=ti.i32, shape=(config.NX, config.NY, config.NZ))
-            self.les_mask.fill(1)
-            # 傳遞相場與掩膜
             try:
-                self.les_model.set_phase_field(self.phase)
-            except Exception:
-                pass
-            try:
-                self.les_model.set_mask(self.les_mask)
-            except Exception:
-                pass
+                from src.physics.les_turbulence import LESTurbulenceModel
+                self.les_model = LESTurbulenceModel()
+                self.use_les = True
+                # 供kernel使用：引用湍流黏性場
+                self.nu_sgs = self.les_model.nu_sgs
+                # LES掩膜：預設全允許，供濾紙/咖啡床禁用
+                self.les_mask = ti.field(dtype=ti.i32, shape=(config.NX, config.NY, config.NZ))
+                self.les_mask.fill(1)
+                # 傳遞相場與掩膜
+                try:
+                    self.les_model.set_phase_field(self.phase)
+                except Exception:
+                    pass
+                try:
+                    self.les_model.set_mask(self.les_mask)
+                except Exception:
+                    pass
+            except ImportError as e:
+                print(f"   ⚠️ LES模組導入失敗: {e}")
+                self.les_model = None
+                self.use_les = False
+                self.nu_sgs = ti.field(dtype=ti.f32, shape=(config.NX, config.NY, config.NZ))
+                self.nu_sgs.fill(0.0)
         else:
             self.les_model = None
             self.use_les = False
@@ -461,9 +461,8 @@ class UltraOptimizedLBMSolver:
                 u_sqr_term = 1.5 * u_sqr
                 
                 # 準備Guo forcing: 合成總體力 = 重力 + 聚合體力
-                # 重力沿負z方向，只在水相（phase≈1）顯著
+                # 重力沿負z方向，只在水相（phase≈1）顯著，移除人工限制
                 gravity_strength = config.GRAVITY_LU * phase_val
-                gravity_strength = ti.min(gravity_strength, 10.0)
                 force_vec = ti.Vector([0.0, 0.0, -gravity_strength]) + self.body_force[i, j, k]
 
                 # SoA collision + streaming（含Guo forcing）
@@ -563,8 +562,8 @@ class UltraOptimizedLBMSolver:
         F_q = 0.0
         if force_norm <= 10.0 and u_norm <= 0.1:
             F_q = self._calculate_forcing_terms(e_q, w_q, tau_safe, u, force)
-        # 保守限幅到與傳統LBM一致的等級
-        max_forcing = 0.01
+        # 放寬限幅以允許更強的物理效果，平衡穩定性與真實性
+        max_forcing = 0.1
         if F_q > max_forcing:
             F_q = max_forcing
         elif F_q < -max_forcing:
