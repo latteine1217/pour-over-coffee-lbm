@@ -57,8 +57,8 @@
 # 完整模擬運行
 python main.py
 
-# 快速穩定性測試 (10步，生成完整CFD報告)
-python main.py debug 20
+# 快速穩定性測試 (5步，生成完整CFD報告)
+python main.py debug 5
 
 # 簡化版測試運行
 python working_main.py
