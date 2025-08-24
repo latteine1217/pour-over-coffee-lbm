@@ -28,7 +28,7 @@ try:
 except Exception as _e:
     print(f"⚠️  YAML設定載入略過: {_e}")
 from config.init import initialize_taichi_once
-from src.core.ultra_optimized_lbm import UltraOptimizedLBMSolver
+from src.core.lbm_unified import UnifiedLBMSolver
 from src.core.thermal_fluid_coupled import ThermalFluidCoupledSolver  # 熱耦合求解器
 from src.core.strong_coupled_solver import StrongCoupledSolver  # Phase 3強耦合
 from src.core.multiphase_3d import MultiphaseFlow3D
@@ -487,8 +487,8 @@ class CoffeeSimulation:
     def _initialize_solver(self):
         """根據模式初始化適當的求解器 - 使用適配器統一介面"""
         if self.thermal_mode == "basic":
-            raw_solver = UltraOptimizedLBMSolver()
-            self.solver_type = "超級優化LBM"
+            raw_solver = UnifiedLBMSolver(preferred_backend='auto')
+            self.solver_type = f"統一LBM ({raw_solver.current_backend if hasattr(raw_solver, 'current_backend') else 'auto'})"
         elif self.thermal_mode == "thermal":
             raw_solver = ThermalFluidCoupledSolver()
             self.solver_type = "熱流耦合"
@@ -497,8 +497,8 @@ class CoffeeSimulation:
             self.solver_type = "Phase 3強耦合"
         else:
             print(f"   ⚠️  未知模式 {self.thermal_mode}，使用基礎LBM")
-            raw_solver = UltraOptimizedLBMSolver()
-            self.solver_type = "基礎LBM (回退)"
+            raw_solver = UnifiedLBMSolver(preferred_backend='auto')
+            self.solver_type = f"統一LBM (回退-{raw_solver.current_backend if hasattr(raw_solver, 'current_backend') else 'auto'})"
         
         # 使用最小開銷適配器包裝求解器
         self.lbm = MinimalAdapter(raw_solver)
