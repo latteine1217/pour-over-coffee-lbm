@@ -37,7 +37,7 @@ try:
     from src.core.strong_coupled_solver import StrongCoupledSolver, StrongCouplingConfig, create_coffee_strong_coupling_system
     from src.physics.temperature_dependent_properties import TemperatureDependentProperties, create_water_properties
     from src.physics.buoyancy_natural_convection import BuoyancyNaturalConvection, create_coffee_buoyancy_system
-    import config.config as config
+    import config
     print("✅ 所有Phase 3模組導入成功")
 except ImportError as e:
     print(f"❌ Phase 3模組導入失敗: {e}")

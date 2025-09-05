@@ -21,7 +21,7 @@ from scipy import ndimage
 from scipy.stats import pearsonr
 
 # 本地模組導入
-import config.config as config
+import config
 
 class EnhancedVisualizer:
     def __init__(self, lbm_solver, multiphase=None, geometry=None, particle_system=None, filter_system=None, simulation=None):

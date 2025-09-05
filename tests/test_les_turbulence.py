@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "")))
 import pytest
 import numpy as np
 import taichi as ti
-import config.config as config
+import config
 from src.physics.les_turbulence import LESTurbulenceModel
 
 # 僅在啟用LES且Re達閾值時執行此測試模組

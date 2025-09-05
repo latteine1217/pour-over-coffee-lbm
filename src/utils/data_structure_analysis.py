@@ -6,7 +6,7 @@ Apple Silicon專用資料結構優化分析
 
 import taichi as ti
 import numpy as np
-import config.config as config
+import config
 
 class AppleSiliconDataStructureOptimizer:
     """Apple Silicon專用資料結構優化器"""

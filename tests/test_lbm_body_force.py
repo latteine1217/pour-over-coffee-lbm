@@ -8,7 +8,7 @@ LBM體力項集成測試 - P1任務1
 
 import taichi as ti
 import numpy as np
-import config.config as config
+import config
 
 # 簡化配置用於測試
 original_nx, original_ny, original_nz = config.NX, config.NY, config.NZ

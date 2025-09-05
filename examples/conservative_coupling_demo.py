@@ -13,7 +13,7 @@ ti.init(arch=ti.cpu)
 print("🔧 Taichi CPU模式初始化")
 
 from src.core.thermal_fluid_coupled import ThermalFluidCoupledSolver, CouplingConfig
-import config.config as config
+import config
 
 def conservative_coupling_demo():
     """保守耦合演示"""

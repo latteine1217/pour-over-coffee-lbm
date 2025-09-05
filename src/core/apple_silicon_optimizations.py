@@ -6,7 +6,7 @@ Apple Silicon專用優化模組
 
 import taichi as ti
 import numpy as np
-import config.config as config
+import config
 import os
 import psutil
 

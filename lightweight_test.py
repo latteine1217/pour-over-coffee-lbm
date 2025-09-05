@@ -11,7 +11,7 @@ import time
 
 # 導入核心模組
 from config.init import initialize_taichi_once
-import config.config as config
+import config
 from src.core.lbm_solver import LBMSolver
 from src.core.multiphase_3d import MultiphaseFlow3D
 from src.physics.coffee_particles import CoffeeParticleSystem

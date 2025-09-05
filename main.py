@@ -19,26 +19,84 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 import numpy as np
 import taichi as ti
 
-# 本地模組導入
-import config.config as config
-# 讀取 YAML 統一設定（在載入求解器前套用允許的覆寫）
+# 本地模組導入 - Phase 1統一配置遷移
 try:
-    from config.config_manager import apply_overrides as _apply_cfg_overrides
-    _apply_cfg_overrides(config)
-except Exception as _e:
-    print(f"⚠️  YAML設定載入略過: {_e}")
-from config.init import initialize_taichi_once
-from src.core.ultra_optimized_lbm import UltraOptimizedLBMSolver
-from src.core.thermal_fluid_coupled import ThermalFluidCoupledSolver  # 熱耦合求解器
-from src.core.strong_coupled_solver import StrongCoupledSolver  # Phase 3強耦合
-from src.core.multiphase_3d import MultiphaseFlow3D
-from src.physics.coffee_particles import CoffeeParticleSystem
-from src.physics.precise_pouring import PrecisePouringSystem
-from src.physics.filter_paper import FilterPaperSystem
-from src.physics.pressure_gradient_drive import PressureGradientDrive
-from src.visualization.visualizer import UnifiedVisualizer
-from src.visualization.enhanced_visualizer import EnhancedVisualizer
-from src.visualization.lbm_diagnostics import LBMDiagnostics
+    # ✅ 直接使用統一配置系統 (Phase 1重構版本)
+    import config
+    print("✅ 載入統一配置系統 (Phase 1)")
+except ImportError:
+    print("❌ 無法導入統一配置模組")
+    sys.exit(1)
+
+# ✅ 統一配置系統已包含所有必要參數，無需額外覆寫
+print(f"🔧 配置摘要: {config.NX}×{config.NY}×{config.NZ}網格, CFL={config.CFL_NUMBER:.3f}")
+
+# 系統初始化 - 使用統一配置的初始化函數
+try:
+    # ✅ 優先使用統一配置的Taichi初始化
+    from config.init import initialize_taichi_once
+    print("✅ 使用統一配置的Taichi初始化")
+except ImportError:
+    # 回退方案：手動初始化
+    print("⚠️  使用手動Taichi初始化")
+    def initialize_taichi_once():
+        import taichi as ti
+        # 簡單檢查避免重複初始化
+        try:
+            # 嘗試訪問ti的屬性來檢查是否已初始化
+            ti.lang.impl.current_cfg()
+            print("   Taichi已初始化")
+        except:
+            ti.init(arch=ti.gpu, device_memory_fraction=0.8)
+            print("   Taichi初始化完成")
+
+# 核心求解器導入
+try:
+    from src.core.lbm_unified import UnifiedLBMSolver
+except ImportError:
+    print("❌ UnifiedLBMSolver導入失敗 - 使用舊版求解器")
+    try:
+        from src.core.legacy.lbm_solver import LBMSolver as UnifiedLBMSolver
+    except ImportError:
+        print("❌ 無法導入任何LBM求解器")
+        sys.exit(1)
+
+try:
+    from src.core.thermal_fluid_coupled import ThermalFluidCoupledSolver
+except ImportError:
+    print("⚠️  ThermalFluidCoupledSolver導入失敗")
+    ThermalFluidCoupledSolver = None
+
+try:
+    from src.core.strong_coupled_solver import StrongCoupledSolver
+except ImportError:
+    print("⚠️  StrongCoupledSolver導入失敗")
+    StrongCoupledSolver = None
+
+try:
+    from src.core.multiphase_3d import MultiphaseFlow3D
+except ImportError:
+    print("❌ MultiphaseFlow3D導入失敗")
+    sys.exit(1)
+
+# 物理模組導入
+try:
+    from src.physics.coffee_particles import CoffeeParticleSystem
+    from src.physics.precise_pouring import PrecisePouringSystem
+    from src.physics.filter_paper import FilterPaperSystem
+    from src.physics.pressure_gradient_drive import PressureGradientDrive
+except ImportError as e:
+    print(f"❌ 物理模組導入失敗: {e}")
+    sys.exit(1)
+
+# 視覺化模組導入
+try:
+    from src.visualization.visualizer import UnifiedVisualizer
+    from src.visualization.enhanced_visualizer import EnhancedVisualizer
+    from src.visualization.lbm_diagnostics import LBMDiagnostics
+except ImportError as e:
+    print(f"❌ 視覺化模組導入失敗: {e}")
+    sys.exit(1)
 
 # 確保Taichi已正確初始化
 initialize_taichi_once()
@@ -333,23 +391,23 @@ class MinimalAdapter:
             self.ux = getattr(solver, 'ux', None)
             self.uy = getattr(solver, 'uy', None)
             self.uz = getattr(solver, 'uz', None)
-            self.body_force = solver.body_force
-            self.boundary_manager = solver.boundary_manager
+            self.body_force = getattr(solver, 'body_force', None)
+            self.boundary_manager = getattr(solver, 'boundary_manager', None)
             self.phase = getattr(solver, 'phase', None)
             self.f = getattr(solver, 'f', None)
             self.f_new = getattr(solver, 'f_new', None)
             self.multiphase = getattr(solver, 'multiphase', None)
         else:
             # 熱耦合求解器路徑
-            fs = solver.fluid_solver
-            self.rho = fs.rho
-            self.u = fs.u 
-            self.solid = fs.solid
+            fs = getattr(solver, 'fluid_solver', solver)  # 使用getattr避免AttributeError
+            self.rho = getattr(fs, 'rho', None)
+            self.u = getattr(fs, 'u', None)
+            self.solid = getattr(fs, 'solid', None)
             self.ux = getattr(fs, 'ux', None)
             self.uy = getattr(fs, 'uy', None)
             self.uz = getattr(fs, 'uz', None)
-            self.body_force = fs.body_force
-            self.boundary_manager = fs.boundary_manager
+            self.body_force = getattr(fs, 'body_force', None)
+            self.boundary_manager = getattr(fs, 'boundary_manager', None)
             self.phase = getattr(fs, 'phase', None)
             self.f = getattr(fs, 'f', None)
             self.f_new = getattr(fs, 'f_new', None)
@@ -487,18 +545,46 @@ class CoffeeSimulation:
     def _initialize_solver(self):
         """根據模式初始化適當的求解器 - 使用適配器統一介面"""
         if self.thermal_mode == "basic":
-            raw_solver = UltraOptimizedLBMSolver()
-            self.solver_type = "超級優化LBM"
+            try:
+                raw_solver = UnifiedLBMSolver(preferred_backend='auto')
+                self.solver_type = f"統一LBM ({getattr(raw_solver, 'current_backend', 'auto')})"
+            except Exception as e:
+                print(f"⚠️  UnifiedLBMSolver初始化失敗: {e}")
+                print("   └─ 使用回退方案...")
+                # 回退方案：使用舊版求解器
+                try:
+                    from src.core.legacy.lbm_solver import LBMSolver
+                    raw_solver = LBMSolver()
+                    self.solver_type = "舊版LBM (回退)"
+                except ImportError:
+                    print("❌ 無法載入任何可用的LBM求解器")
+                    sys.exit(1)
+                    
         elif self.thermal_mode == "thermal":
+            if ThermalFluidCoupledSolver is None:
+                print("❌ ThermalFluidCoupledSolver未可用，切換到基礎模式")
+                self.thermal_mode = "basic"
+                return self._initialize_solver()
             raw_solver = ThermalFluidCoupledSolver()
             self.solver_type = "熱流耦合"
+            
         elif self.thermal_mode == "strong_coupled":
+            if StrongCoupledSolver is None:
+                print("❌ StrongCoupledSolver未可用，切換到基礎模式")
+                self.thermal_mode = "basic"
+                return self._initialize_solver()
             raw_solver = StrongCoupledSolver()
             self.solver_type = "Phase 3強耦合"
+            
         else:
             print(f"   ⚠️  未知模式 {self.thermal_mode}，使用基礎LBM")
-            raw_solver = UltraOptimizedLBMSolver()
-            self.solver_type = "基礎LBM (回退)"
+            try:
+                raw_solver = UnifiedLBMSolver(preferred_backend='auto')
+                self.solver_type = f"統一LBM (回退-{getattr(raw_solver, 'current_backend', 'auto')})"
+            except Exception:
+                from src.core.legacy.lbm_solver import LBMSolver
+                raw_solver = LBMSolver()
+                self.solver_type = "舊版LBM (回退)"
         
         # 使用最小開銷適配器包裝求解器
         self.lbm = MinimalAdapter(raw_solver)
@@ -511,7 +597,7 @@ class CoffeeSimulation:
         print("🔧 階段0：CFD一致性檢查...")
         # === 階段0：CFD參數一致性驗證 ===
         try:
-            config.validate_parameter_consistency()
+            config.check_parameter_consistency()
             print("   ✅ CFD參數一致性檢查通過")
         except Exception as e:
             print(f"   ⚠️  CFD參數一致性警告: {e}")
@@ -738,9 +824,12 @@ class CoffeeSimulation:
                 self.lbm.apply_boundary()
         
         # 濾紙系統更新（如果有相關方法）
-        if self.filter_paper and hasattr(self.filter_paper, 'update_flow_through_filter'):
+        if self.filter_paper:
             try:
-                self.filter_paper.update_flow_through_filter()
+                # 使用正確的方法名稱 update_dynamic_resistance
+                if hasattr(self.filter_paper, 'update_dynamic_resistance'):
+                    self.filter_paper.update_dynamic_resistance()
+                # 如果沒有更新方法，默默跳過
             except Exception as e:
                 if self.step_count % 100 == 0:
                     print(f"   ⚠️ 濾紙更新失敗: {str(e)[:50]}")
@@ -980,12 +1069,17 @@ class CoffeeSimulation:
             
             # 如果使用SoA布局，手動計算速度統計
             if hasattr(self.lbm, 'ux') and hasattr(self.lbm, 'uy') and hasattr(self.lbm, 'uz'):
-                ux_data = self.lbm.ux.to_numpy()
-                uy_data = self.lbm.uy.to_numpy() 
-                uz_data = self.lbm.uz.to_numpy()
-                u_magnitude = np.sqrt(ux_data**2 + uy_data**2 + uz_data**2)
-                stats['max_velocity'] = float(np.max(u_magnitude))
-                stats['avg_velocity'] = float(np.mean(u_magnitude))
+                if self.lbm.ux is not None and self.lbm.uy is not None and self.lbm.uz is not None:
+                    try:
+                        ux_data = self.lbm.ux.to_numpy()
+                        uy_data = self.lbm.uy.to_numpy() 
+                        uz_data = self.lbm.uz.to_numpy()
+                        u_magnitude = np.sqrt(ux_data**2 + uy_data**2 + uz_data**2)
+                        stats['max_velocity'] = float(np.max(u_magnitude))
+                        stats['avg_velocity'] = float(np.mean(u_magnitude))
+                    except Exception:
+                        # 如果SoA速度場轉換失敗，使用默認值
+                        pass
             
             # 添加注水狀態調試信息
             if hasattr(self, 'pouring') and self.pouring:
@@ -1096,12 +1190,12 @@ class CoffeeSimulation:
             # 使用numpy直接保存數據
             import numpy as np
             
-            if hasattr(self.lbm, 'rho'):
+            if hasattr(self.lbm, 'rho') and self.lbm.rho is not None:
                 rho_data = self.lbm.rho.to_numpy()
                 np.save(f"{filename_base}_density_data.npy", rho_data)
                 print(f"   └─ 密度數據已保存: {filename_base}_density_data.npy")
             
-            if hasattr(self.lbm, 'u'):
+            if hasattr(self.lbm, 'u') and self.lbm.u is not None:
                 u_data = self.lbm.u.to_numpy()
                 u_mag = np.sqrt(u_data[:,:,:,0]**2 + u_data[:,:,:,1]**2 + u_data[:,:,:,2]**2)
                 np.save(f"{filename_base}_velocity_data.npy", u_mag)

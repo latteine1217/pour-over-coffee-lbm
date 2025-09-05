@@ -7,7 +7,7 @@
 
 import taichi as ti
 import numpy as np
-import config.config as config
+import config
 import math
 from typing import Dict, Any
 

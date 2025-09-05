@@ -26,7 +26,7 @@ except ImportError:
 
 import taichi as ti
 import numpy as np
-import config.config as config
+import config
 from typing import Optional, Union, Tuple
 
 @ti.data_oriented

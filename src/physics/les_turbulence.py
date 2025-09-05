@@ -30,7 +30,7 @@ LES (Large Eddy Simulation) 大渦模擬湍流模型
 from typing import Optional, Tuple
 import taichi as ti
 import numpy as np
-import config.config as config
+import config
 
 @ti.data_oriented
 class LESTurbulenceModel:

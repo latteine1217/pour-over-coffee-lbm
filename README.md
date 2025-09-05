@@ -1,212 +1,142 @@
-# ☕ Pour-Over 咖啡 CFD 流體模擬系統
+# ☕ Pour-Over CFD Simulation
 
-> **V60手沖咖啡沖煮過程的工業級3D計算流體力學模擬系統**  
-> 🤖 **使用 [opencode](https://opencode.ai) + GitHub Copilot 開發**  
-> 🚀 **NVIDIA P100 雙GPU並行計算優化版**
+> **V60手沖咖啡3D計算流體力學模擬系統**  
+> 🔬 基於D3Q19格子玻爾茲曼方法的研究型實現  
+> 🛠️ 開發工具：[OpenCode](https://github.com/sst/opencode) + GitHub Copilot  
+> ⚗️ **實驗性專案** - 持續開發與驗證中
 
-## 🎯 專案簡介
+[![Python](https://img.shields.io/badge/Python-3.10.12-blue.svg)](https://python.org)
+[![Taichi](https://img.shields.io/badge/Taichi-1.7.4-green.svg)](https://taichi-lang.org)
+[![Development Status](https://img.shields.io/badge/Status-Experimental-orange.svg)]()
+[![License](https://img.shields.io/badge/License-MIT-yellow.svg)]()
+[![Platform](https://img.shields.io/badge/Platform-macOS-lightgrey.svg)]()
 
-本專案提供工業級精度的手沖咖啡沖煮物理模擬：
+## 🎯 專案概述
 
-- 💧 **3D水流動力學** - V60濾杯完整幾何建模
-- ☕ **咖啡顆粒追蹤** - 1,995+顆粒拉格朗日追蹤
-- 🌊 **多相流模擬** - 水-空氣界面動力學  
-- 🔬 **格子玻爾茲曼法** - D3Q19高精度數值模型
-- ⚡ **GPU加速運算** - Taichi框架Metal/CUDA並行
-- ⚡ **雙GPU P2P通訊** - NVIDIA P100雙GPU直接記憶體存取
-- 📊 **即時3D視覺化** - 專業級CFD分析圖表
-- 🆕 **CFD工程師級分析** - 7種專業分析模式
-- 🆕 **智能報告管理** - 時間戳自動目錄結構
-- 🌡️ **熱流耦合系統** - 溫度-流動耦合模擬
-- 🔧 **重力流動修正** - 純重力模式下的水流停滯問題已解決
-- 🎨 **動態範圍colorbar** - 智能視覺化範圍調整 (最新功能)
-- 📈 **時序參數分析** - 關鍵CFD參數演化追蹤 (最新功能)
+本專案是一個研究性的3D計算流體力學模擬系統，專注於V60手沖咖啡沖煮過程的物理建模。採用D3Q19格子玻爾茲曼方法，嘗試實現多相流動、咖啡顆粒追蹤、湍流建模等複雜物理現象的數值模擬。
 
-### 關鍵數值更新（2025-08）
-- LES-τ_eff 整合：採用 Smagorinsky SGS 黏性以 `τ_eff = τ_mol + 3ν_sgs` 方式直接整合入 BGK 碰撞，避免二次鬆弛，數值更穩定。
-- Guo Forcing 統一外力：重力、壓力梯度、表面張力、濾紙阻力等外力統一累加至 `body_force`，由碰撞核的 Guo forcing 一次性處理，確保守恆與穩定性。
-- 禁用運行期密度驅動：密度場驅動僅允許初始化調整；運行期完全以外力方式推動流動，避免破壞 EOS 與守恆。
-- LES 局域屏蔽：在濾紙多孔域、低剪切區與界面厚區關閉 ν_sgs，自由液相噴流/剪切層保留湍流黏性。
+⚠️ **重要提醒**：本專案目前處於實驗開發階段，部分功能可能不穩定或需要進一步驗證。
 
-### 🔧 三相系統關鍵修復（2025-08-20）
-- **相場密度映射修正**：修復Cahn-Hilliard方程密度映射錯誤，確保 `ρ = ρ_air + (ρ_water - ρ_air) × (φ + 1) / 2` 物理正確性
-- **漸進式注水機制**：採用時間常數控制相場變化率，避免突跳式 `φ = 1.0` 導致的數值衝擊與發散  
-- **三相邊界處理增強**：添加相場範圍檢查 `[-1, +1]`，確保物理量邊界條件正確
-- **數值穩定性保證**：解決"多步結果相同"問題，恢復物理演化與時間推進正確性
-- **注水物理邏輯修正**：修正垂直距離計算與重力參數，確保水流向下流動的基本物理行為
+### 🔬 主要研究目標
+- **流體力學建模**: 基於LBM的3D流場計算
+- **多相流模擬**: 水-空氣界面動力學研究  
+- **顆粒追蹤**: 咖啡顆粒運動軌跡分析
+- **湍流現象**: LES大渦模擬實驗
+- **熱傳導耦合**: 溫度場與流場的相互作用
+- **GPU並行化**: Taichi框架的性能優化探索
 
-## 🔧 最新修復 (2025-08-20)
+## 🚀 使用指南
 
-### **三相系統核心問題修復**
+### 環境要求
+- **Python**: 3.10+ (已測試: 3.10.12)
+- **Taichi**: 1.7+ (已驗證: 1.7.4)  
+- **平台**: macOS (主要開發平台)，Linux (理論支援)
+- **記憶體**: 建議 8GB+ RAM
+- **GPU**: 可選，Apple Metal 或 NVIDIA CUDA
 
-我們成功診斷並修復了導致模擬"不同步數結果相同"的根本問題：
-
-#### **🔍 問題診斷**
-- **注水物理邏輯錯誤**：垂直距離計算錯誤導致水往上流
-- **三相數學模型錯誤**：密度映射函數錯誤，界面區域密度計算不正確  
-- **數值衝擊問題**：突跳式相場設置破壞Cahn-Hilliard方程穩定性
-- **相場標記混亂**：多種映射邏輯不一致，邊界處理不完整
-
-#### **🛠️ 核心修復**
-1. **密度映射修正** (`src/core/multiphase_3d.py:449-467`)
-   ```python
-   # 修復前：錯誤的密度映射導致物理量不一致
-   # 修復後：正確的線性插值映射
-   ρ = ρ_air + (ρ_water - ρ_air) × (φ + 1) / 2
-   ```
-
-2. **漸進式注水機制** (`src/physics/precise_pouring.py:250-290`)
-   ```python
-   # 避免突跳式 φ = 1.0，採用時間常數控制
-   phi_target = 1.0
-   tau_transition = 0.1  # 時間常數控制變化率
-   phi_new = phi_old + (phi_target - phi_old) * dt / tau_transition
-   ```
-
-3. **相場範圍檢查** (`src/core/multiphase_3d.py:493-507`)
-   ```python
-   # 確保相場在物理範圍內 [-1, +1]
-   phi = max(-1.0, min(1.0, phi))
-   ```
-
-4. **注水物理邏輯修正** (`src/physics/precise_pouring.py`)
-   - 修正垂直距離計算：`distance_to_pour = pour_z - k`
-   - 調整重力參數：`GRAVITY_STRENGTH_FACTOR = 0.30` (提升2倍)
-
-#### **📊 修復效果**
-- ✅ **恢復物理演化**：解決"多步結果相同"問題
-- ✅ **數值穩定性**：消除相場突跳導致的發散
-- ✅ **物理正確性**：確保水流向下流動的基本行為
-- ✅ **一致性保證**：統一相場映射邏輯，確保物理量正確對應
-
-#### **🔬 技術細節**
-- **理論基礎**：基於Cahn-Hilliard相場方程的正確數學實現
-- **數值方法**：混合歐拉-拉格朗日方法，D3Q19 LBM求解
-- **穩定性控制**：時間常數控制相場變化率，避免數值衝擊
-- **邊界處理**：完整的三相邊界條件與範圍檢查
-
-這次修復不僅解決了表面現象，更重要的是修正了**三相系統的數學基礎錯誤**，確保了CFD模擬的物理正確性和數值穩定性。
-
----
-
-## 🚀 快速開始
-
-### 系統需求
-- Python 3.9+
-- 8GB+ GPU記憶體（建議）
-- [Taichi](https://github.com/taichi-dev/taichi) 計算框架
-
-### 安裝
+### 安裝步驟
 ```bash
-git clone https://github.com/yourusername/pour-over-cfd
-cd pour-over-cfd
+# 克隆專案
+git clone <repository-url>
+cd pour-over
+
+# 安裝依賴
 pip install -r requirements.txt
 ```
 
-### 配置要點（YAML）
-- pouring.inlet_diameter_m: 以「米」直接設定入水直徑（預設 0.005 = 0.5 cm 噴嘴）。
-- pouring.pour_rate_ml_s: 注水流量（ml/s）。
-
-說明：系統僅支援 `pouring.inlet_diameter_m` 作為入口幾何設定；舊的 `inlet_diameter_ratio` 已移除，請改用物理直徑鍵以確保可重現與物理一致性。
-
-### 執行模擬
+### 基本測試
 ```bash
-# 基礎LBM模擬 (建議首次測試 - 驗證三相系統修復)
-python main.py                # 完整模擬 (~10分鐘)
-python main.py debug 100      # 🆕 推薦：驗證修復效果，觀察物理演化
-python main.py debug 10       # 快速測試含CFD報告 
-python main.py debug 5        # 超快速預覽 (5步驟)
+# 檢查環境
+python -c "import taichi as ti; print(f'Taichi {ti.__version__} ready')"
 
-# 🌡️ 熱耦合模擬 (新功能)
-python main.py debug 10 none thermal          # 熱流耦合模式 
-python main.py debug 10 none strong_coupled   # Phase 3強耦合模式
-python main.py thermal thermal 10             # 專門熱耦合測試
+# 基本功能測試 (如果可用)
+python main.py debug 5
 
-# 高性能引擎
-python lightweight_test.py    # 輕量版本測試
-python jax_hybrid_core.py      # 高性能JAX引擎測試
-
-# 專業視覺化
-python examples/conservative_coupling_demo.py # 驗證V60幾何模型
+# 個別模組測試
+python lightweight_test.py
 ```
 
-> **🔧 修復驗證提示**：運行 `python main.py debug 100` 可以觀察到修復後的物理演化效果，與之前"多步結果相同"的問題形成對比。模擬將產生專業CFD報告於 `report/{timestamp}/` 目錄。
+⚠️ **注意**: 由於專案正在開發中，部分功能可能需要額外配置或除錯。
 
-## 📊 關鍵性能指標
-
-| 指標 | 數值 | 狀態 |
-|------|------|------|
-| **網格解析度** | 224³ (1,120萬格點) | ✅ 研究級精度 |
-| **計算速度** | 159M+ 格點/秒 | ✅ 工業級性能 |
-| **數值穩定性** | 100% 收斂率 | ✅ 生產就緒 |
-| **記憶體使用** | 852 MB | ✅ 高效優化 |
-| **測試覆蓋率** | 85%+ | ✅ 企業級標準 |
-| **🆕 CFD分析功能** | 7種專業分析類型 | ✅ 研究級 |
-| **🆕 報告生成** | 自動時間戳報告 | ✅ 專業工作流 |
-| **🌡️ 熱耦合系統** | 溫度-流動耦合模擬 | ✅ 新功能 |
-
-## 🏗️ 系統架構
-
-### 📁 項目結構
+## 📁 專案架構
 
 ```
 pour-over/                                                      # 🏗️ 根目錄
-├── 🚀 main.py                                                  # 統一主模擬程式 - 支援熱耦合與壓力驅動模式 (1254行)
-├── 🔧 lightweight_test.py                                       # 輕量級測試程式 - 快速驗證與開發測試 (174行)
-├── ⚡ jax_hybrid_core.py                                       # JAX-Taichi混合超級計算引擎 - XLA編譯器最佳化 (308行)
-├── 📄 README.md                                               # 主要說明文檔 - 完整專案介紹與使用指南
-├── 🛠️ requirements.txt                                        # Python依賴套件清單
-├── ⚙️ pytest.ini                                              # 測試框架配置檔案
-├── 🔍 codecov.yml                                             # 代碼覆蓋率配置
-├── 📋 .flake8                                                 # Python代碼風格檢查配置
-├── 🎯 .coveragerc                                            # 測試覆蓋率配置
+├── 📄 README.md                                               # 專案說明文檔
+├── 🔧 requirements.txt                                        # Python依賴套件清單
+├── ⚙️ pytest.ini                                              # 測試框架配置
+├── 🎯 codecov.yml                                             # 代碼覆蓋率配置
+├── 📋 .flake8                                                 # Python代碼風格檢查
+├── 🔍 .coveragerc                                             # 測試覆蓋率配置
+├── 🚀 main.py                                                  # 統一主模擬程式 - 支援熱耦合與壓力驅動
+├── ⚡ jax_hybrid_core.py                                       # JAX-Taichi混合計算引擎
+├── 🔧 lightweight_test.py                                       # 輕量級測試程式
+├── 📝 AGENTS.md                                               # Agent開發指南
+├── 📊 GEMINI.md                                               # Gemini模型集成說明
+├── 📋 REFACTORING_PLAN.md                                      # 重構計劃文檔
+├── 💾 backups/                                                # 重要檔案備份
 ├── src/                                                       # 📦 核心模組目錄
 │   ├── 🧠 core/                                               # 計算引擎核心
-│   │   ├── lbm_solver.py                                      # D3Q19格子玻爾茲曼求解器 - 3D流體力學核心
-│   │   ├── ultra_optimized_lbm.py                            # 超級優化版LBM - Apple Silicon深度優化 (SoA布局)
-│   │   ├── multiphase_3d.py                                  # 3D多相流系統 - 水-空氣界面動力學 (Cahn-Hilliard方程)
-│   │   ├── thermal_fluid_coupled.py                          # 🌡️ 熱流弱耦合求解器 - Phase 2流體→熱傳單向耦合
-│   │   ├── strong_coupled_solver.py                          # Phase 3強耦合求解器 - 完全雙向熱流耦合
-│   │   ├── ultimate_cfd_system.py                            # 終極CFD集成系統 - 企業級整合解決方案
-│   │   ├── apple_silicon_optimizations.py                    # Apple Silicon專用優化 - Metal GPU加速
-│   │   ├── cuda_dual_gpu_lbm.py                              # NVIDIA雙GPU並行LBM - P2P記憶體最佳化
-│   │   ├── memory_optimizer.py                               # 記憶體管理最佳化器 - 大規模網格支援
-│   │   ├── numerical_stability.py                            # 數值穩定性控制器 - 100%收斂保證
-│   │   ├── lbm_protocol.py                                   # LBM協議定義 - 統一介面標準
-│   │   └── __init__.py                                       # 核心模組初始化
+│   │   ├── lbm_unified.py                                     # 統一LBM求解器系統
+│   │   ├── multiphase_3d.py                                  # 3D多相流系統
+│   │   ├── thermal_fluid_coupled.py                          # 🌡️ 熱流弱耦合求解器
+│   │   ├── strong_coupled_solver.py                          # Phase 3強耦合求解器
+│   │   ├── ultimate_cfd_system.py                            # 集成CFD系統
+│   │   ├── apple_silicon_optimizations.py                    # Apple Silicon專用優化
+│   │   ├── memory_optimizer.py                               # 記憶體管理最佳化器
+│   │   ├── numerical_stability.py                            # 數值穩定性控制器
+│   │   ├── lbm_algorithms.py                                 # LBM算法庫
+│   │   ├── lbm_protocol.py                                   # LBM協議定義
+│   │   ├── backends/                                         # 計算後端系統
+│   │   │   ├── compute_backends.py                          # 後端工廠管理器
+│   │   │   ├── apple_backend.py                             # Apple Metal後端
+│   │   │   ├── cuda_backend.py                              # NVIDIA CUDA後端
+│   │   │   └── cpu_backend.py                               # CPU參考後端
+│   │   ├── adapters/                                         # 記憶體布局適配器
+│   │   │   ├── memory_layouts.py                            # 記憶體布局管理
+│   │   │   ├── soa_adapter.py                               # SoA布局適配器
+│   │   │   ├── standard_adapter.py                          # 標準布局適配器
+│   │   │   └── gpu_adapter.py                               # GPU優化適配器
+│   │   └── legacy/                                           # 遺留系統(參考用)
+│   │       ├── lbm_solver.py                                # 原始LBM求解器
+│   │       ├── ultra_optimized_lbm.py                       # 優化版LBM求解器
+│   │       └── cuda_dual_gpu_lbm.py                         # 雙GPU並行LBM
 │   ├── 🔬 physics/                                           # 物理模型系統
-│   │   ├── coffee_particles.py                               # 咖啡顆粒拉格朗日追蹤 - 1,995顆粒穩定運行
-│   │   ├── filter_paper.py                                   # V60濾紙多孔介質 - Darcy定律與動態阻力
-│   │   ├── boundary_conditions.py                            # V60幾何邊界處理 - 完整濾杯建模
-│   │   ├── precise_pouring.py                                # 精確注水系統 - 0.5cm直徑垂直水流
-│   │   ├── pressure_gradient_drive.py                        # 壓力梯度驅動系統 - 突破LBM重力限制
-│   │   ├── les_turbulence.py                                 # LES大渦模擬 - Smagorinsky湍流模型
-│   │   ├── thermal_lbm.py                                    # 熱傳導LBM - 溫度場求解器
-│   │   ├── thermal_properties.py                             # 熱物性參數管理 - 溫度相依性質
-│   │   ├── temperature_dependent_properties.py               # 動態熱物性 - 實時溫度耦合
-│   │   ├── buoyancy_natural_convection.py                    # 浮力自然對流 - 溫差驅動流動
-│   │   └── __init__.py                                       # 物理模組初始化
+│   │   ├── coffee_particles.py                               # 咖啡顆粒拉格朗日追蹤
+│   │   ├── filter_paper.py                                   # V60濾紙多孔介質
+│   │   ├── boundary_conditions.py                            # V60幾何邊界處理
+│   │   ├── precise_pouring.py                                # 精確注水系統
+│   │   ├── pressure_gradient_drive.py                        # 壓力梯度驅動系統
+│   │   ├── les_turbulence.py                                 # LES大渦模擬
+│   │   ├── thermal_lbm.py                                    # 熱傳導LBM
+│   │   ├── thermal_properties.py                             # 熱物性參數管理
+│   │   ├── temperature_dependent_properties.py               # 動態熱物性
+│   │   └── buoyancy_natural_convection.py                    # 浮力自然對流
 │   ├── 📊 visualization/                                     # 視覺化與分析系統  
-│   │   ├── enhanced_visualizer.py                            # CFD工程師級科研分析 - 7種專業視覺化模式 (1669行)
-│   │   ├── visualizer.py                                     # 統一視覺化管理器 - 即時3D監控
-│   │   ├── lbm_diagnostics.py                                # LBM診斷監控系統 - 數值品質與守恆定律檢查
-│   │   ├── geometry_visualizer.py                            # 幾何模型視覺化 - V60濾杯專業製圖
-│   │   └── __init__.py                                       # 視覺化模組初始化
-│   ├── 🛠️ utils/                                             # 工具函數庫
-│   │   ├── config_validator.py                               # 配置參數驗證器 - CFD參數一致性檢查
-│   │   ├── error_handling.py                                 # 企業級錯誤處理 - 異常捕獲與恢復
-│   │   ├── data_structure_analysis.py                        # 資料結構分析工具 - 記憶體布局最佳化
-│   │   ├── physics_plugin_system.py                          # 物理外掛系統 - 模組化擴展框架
-│   │   └── __init__.py                                       # 工具模組初始化
-│   └── __init__.py                                           # 源碼模組初始化
+│   │   ├── enhanced_visualizer.py                            # CFD工程師級科研分析
+│   │   ├── visualizer.py                                     # 統一視覺化管理器
+│   │   ├── lbm_diagnostics.py                                # LBM診斷監控系統
+│   │   └── geometry_visualizer.py                            # 幾何模型視覺化
+│   └── 🛠️ utils/                                             # 工具函數庫
+│       ├── config_validator.py                               # 配置參數驗證器
+│       ├── error_handling.py                                 # 錯誤處理工具
+│       ├── data_structure_analysis.py                        # 資料結構分析工具
+│       └── physics_plugin_system.py                          # 物理外掛系統
 ├── ⚙️ config/                                                # 配置管理系統
-│   ├── config.py                                             # 核心CFD參數配置 - 科學級穩定參數 (工業級調校)
-│   ├── thermal_config.py                                     # 🌡️ 熱流系統參數 - 溫度邊界條件與物性
-│   ├── init.py                                               # Taichi系統初始化 - GPU後端配置
-│   └── __init__.py                                           # 配置模組初始化
+│   ├── config.py                                             # 核心CFD參數配置
+│   ├── core.py                                               # 核心配置參數
+│   ├── physics.py                                            # 物理系統參數
+│   ├── thermal.py                                            # 🌡️ 熱流系統參數
+│   ├── init.py                                               # Taichi系統初始化
+│   ├── config.yaml                                           # YAML配置檔案
+│   └── legacy/                                               # 配置系統備份
+│       ├── config_original.py                               # 原始配置備份
+│       ├── core_config_original.py                          # 核心配置備份
+│       ├── physics_config_original.py                       # 物理配置備份
+│       └── thermal_config_original.py                       # 熱流配置備份
 ├── 🧪 tests/                                                 # 全面測試系統 (85%+ 覆蓋率)
 │   ├── unit/                                                 # 🔬 單元測試套件
-│   ├── integration/                                          # 🔧 整合測試套件 (8個專業測試)
+│   ├── integration/                                          # 🔧 整合測試套件
 │   │   ├── test_thermal_integration.py                       # 熱耦合系統整合測試
 │   │   ├── test_phase3_strong_coupling.py                    # Phase 3強耦合完整測試  
 │   │   ├── test_weak_coupling.py                             # 弱耦合系統測試
@@ -221,32 +151,25 @@ pour-over/                                                      # 🏗️ 根目
 │   ├── test_pressure_gradient.py                             # 壓力梯度測試
 │   ├── test_les_turbulence.py                                # LES湍流測試
 │   ├── test_numerical_stability.py                           # 數值穩定性測試
-│   ├── test_enhanced_viz.py                                  # 增強視覺化測試 (報告系統)
+│   ├── test_enhanced_viz.py                                  # 增強視覺化測試
 │   ├── test_lbm_diagnostics.py                               # 診斷系統測試
-│   ├── test_visualizer.py                                    # 視覺化系統測試
-│   ├── README.md                                             # 測試系統使用說明
-│   └── __init__.py                                           # 測試模組初始化
+│   └── test_visualizer.py                                    # 視覺化系統測試
 ├── 📚 examples/                                              # 示例演示程式
-│   ├── conservative_coupling_demo.py                         # 保守耦合演示 - 專業幾何分析視覺化
-│   ├── convection_effect_demo.py                             # 對流效應演示 - 熱傳導效應
-│   ├── detailed_coupling_demo.py                             # 詳細耦合演示 - 完整物理耦合
-│   └── __init__.py                                           # 示例模組初始化
+│   ├── conservative_coupling_demo.py                         # 保守耦合演示
+│   ├── convection_effect_demo.py                             # 對流效應演示
+│   └── detailed_coupling_demo.py                             # 詳細耦合演示
 ├── 🏃 benchmarks/                                            # 性能基準測試
-│   ├── benchmark_suite.py                                    # 標準性能測試套件 - 系統性能評估
-│   ├── ultimate_benchmark_suite.py                          # 終極性能測試 - 極限負載測試
-│   └── __init__.py                                           # 基準測試模組初始化
+│   ├── benchmark_suite.py                                    # 標準性能測試套件
+│   └── ultimate_benchmark_suite.py                          # 進階性能測試
 ├── 📖 docs/                                                  # 技術文檔系統 (53,000+字)
 │   ├── 📊 mathematical/                                      # 數學模型完整推導
-│   │   └── mathematical_models.md                           # 完整數學方程式推導 (255+方程)
+│   │   └── mathematical_models.md                           # 完整數學方程式推導
 │   ├── 🔬 physics/                                           # 物理建模詳細說明
 │   │   └── physics_modeling.md                              # 物理現象建模細節
 │   ├── 📈 performance/                                       # 性能分析報告
 │   │   └── performance_analysis.md                          # 詳細基準測試結果
 │   ├── 📄 technical/                                         # 技術論文
-│   │   └── technical_paper.md                               # 期刊級研究論文
-│   ├── THERMAL_DEVELOPMENT_PLAN.md                          # 🌡️ 熱流系統開發路線圖
-│   ├── THERMAL_PHASE3_ANALYSIS.md                           # Phase 3強耦合系統分析報告
-│   ├── DEPENDENCY_ANALYSIS.md                               # 系統依賴關係分析
+│   │   └── technical_paper.md                               # 技術研究論文草稿
 │   ├── CI_CD_GUIDE.md                                       # 持續整合/部署指南
 │   ├── README.md                                            # 文檔系統導覽
 │   └── 技術文檔_完整物理建模.md                               # 中文版完整技術文檔
@@ -254,398 +177,173 @@ pour-over/                                                      # 🏗️ 根目
 │   ├── update_imports.py                                     # Import路徑批量更新工具
 │   ├── fix_config_imports.py                                # 配置導入修正工具
 │   └── fix_test_imports.py                                   # 測試路徑修正工具
-├── 💾 backups/                                               # 重要檔案備份
-│   ├── config_backup_20250724_155949.py                     # 配置檔案時間戳備份
-│   └── boundary_conditions_backup.py                        # 邊界條件備份
+├── 📊 benchmark_results/                                      # 性能基準測試結果
+│   ├── benchmark_results.json                            # 標準基準測試數據
+│   └── ultimate_optimization_results.json               # 進階優化測試結果
+├── 💾 data/                                               # CFD數據輸出
+│   ├── cfd_data_export_step_XXXX.json                   # CFD完整數據導出 (JSON格式)
+│   └── cfd_data_export_step_XXXX.npz                    # CFD數據緊湊格式 (NumPy格式)
+├── 📊 results/                                            # 模擬結果存檔
+│   └── simulation_YYYYMMDD_HHMMSS/                      # 時間戳結果目錄
+│       └── statistics_step_XXXXXX.json                  # 統計數據檔案
+├── 📋 report/                                             # 專業CFD報告系統
+│   ├── YYYYMMDD_HHMMSS/                                 # 時間戳報告目錄
+│   │   ├── images/                                      # CFD分析圖片
+│   │   │   ├── cfd_pressure_analysis_step_XXXX.png     # 壓力場分析
+│   │   │   ├── cfd_turbulence_analysis_step_XXXX.png   # 湍流特徵分析
+│   │   │   ├── cfd_dimensionless_analysis_step_XXXX.png # 無量綱數分析
+│   │   │   ├── cfd_boundary_layer_analysis_step_XXXX.png # 邊界層分析
+│   │   │   ├── velocity_analysis_step_XXXX.png          # 速度場分析
+│   │   │   ├── v60_longitudinal_analysis_step_XXXX.png  # V60縱向分析
+│   │   │   ├── combined_analysis_step_XXXX.png          # 綜合多物理場分析
+│   │   │   └── time_series_analysis_step_XXXX.png       # 時序參數分析
+│   │   ├── data/                                        # 數值數據輸出
+│   │   │   ├── time_series_data_step_XXXX.json         # 時序數據
+│   │   │   └── cfd_data_export_step_XXXX.npz           # CFD數據導出
+│   │   └── analysis/                                    # 詳細分析報告
+│   └── geometry/                                        # 幾何模型分析報告
+│       ├── professional_cross_section_analysis.png      # 專業橫截面分析
+│       ├── professional_3d_geometry_model.png           # 3D工程模型
+│       ├── engineering_drawings.png                     # 工程製圖
+│       ├── coffee_particle_distribution.png             # 咖啡顆粒分布分析
+│       └── particle_size_distribution.png               # 顆粒大小分佈分析
 └── .github/                                                  # GitHub工作流程
     └── workflows/
         └── ci.yml                                            # CI/CD自動化配置
 ```
 
-### 🧠 核心計算模組 (src/core/)
+## 🛠️ 開發指引
 
-**主要求解器架構**
-- **`lbm_solver.py`** - D3Q19格子玻爾茲曼基礎求解器 (1400+行)
-  - 🔬 3D流體力學核心引擎，採用D3Q19離散速度模型
-  - 🌀 集成LES湍流建模 (Smagorinsky模型)，支援高Reynolds數流動
-  - 💧 多相流支援，處理水-空氣界面動力學
-  - ⚡ GPU並行優化，企業級錯誤監控
-  
-- **`ultra_optimized_lbm.py`** - 超級優化版求解器 (800+行)
-  - 🚀 針對Apple Silicon的終極優化，採用真正SoA布局
-  - 🍎 Metal GPU深度優化，cache-line對齊設計  
-  - ⚡ 統一記憶體零拷貝技術，SIMD vectorization友好
-  - 📈 極致性能：159M+ 格點/秒運算能力
-
-- **`multiphase_3d.py`** - 3D多相流系統 (600+行)
-  - 🌊 基於Cahn-Hilliard相場方程的科學級實現
-  - 💧 完整水-空氣界面動力學，表面張力精確計算
-  - 📐 連續表面力模型，界面法向量與曲率場計算
-  - 🔬 參考Jacqmin(1999)、Lee & Fischer(2006)理論
-  - 🔧 **修復密度映射** - 確保 `ρ = ρ_air + (ρ_water - ρ_air) × (φ + 1) / 2` 數學正確性
-  - ⚡ **漸進式注水機制** - 避免相場突跳導致的數值發散
-
-**熱流耦合求解器**
-- **`thermal_fluid_coupled.py`** - Phase 2弱耦合系統 (400+行)
-  - 🌡️ 流體→熱傳單向耦合，交替求解策略
-  - 📊 時序協調控制，數值穩定性保證
-  - ⚡ 性能監控與診斷功能
-  
-- **`strong_coupled_solver.py`** - Phase 3強耦合系統 (600+行)
-  - 🔥 完全雙向熱流耦合，溫度-流動實時交互
-  - 🌡️ 溫度相依流體性質，浮力驅動自然對流
-  - 📈 數值穩定性控制，企業級錯誤處理
-
-**系統優化與支援**
-- **`ultimate_cfd_system.py`** - 終極CFD集成系統
-  - 🏗️ 企業級整合解決方案，統一多物理場管理
-  - 📊 智能負載平衡，自適應計算資源分配
-  
-- **`apple_silicon_optimizations.py`** - Apple Silicon專用優化
-  - 🍎 M1/M2/M3晶片檢測與配置，Metal GPU最大化利用
-  - ⚡ 記憶體帶寬最佳化，統一記憶體架構充分發揮
-  
-- **`cuda_dual_gpu_lbm.py`** - NVIDIA雙GPU並行
-  - 🔥 P100雙GPU直接記憶體存取，P2P高速通訊
-  - 📈 負載動態平衡，最大化並行效能
-
-- **其他支援模組**
-  - **`memory_optimizer.py`** - 記憶體管理，支援大規模網格
-  - **`numerical_stability.py`** - 數值穩定性控制，100%收斂保證
-  - **`lbm_protocol.py`** - LBM統一協議，標準化介面定義
-
-### 📊 視覺化與分析系統 (src/visualization/)
-
-**CFD工程師級科研視覺化**
-- **`enhanced_visualizer.py`** - 科研級增強視覺化系統 (2000+行)
-  - 🔬 **7種專業CFD分析模式**：壓力場、湍流特徵、無量綱數、邊界層、流動拓撲
-  - 📈 **壓力場分析**：壓力梯度場、壓力係數分布、損失計算與可視化
-  - 🌀 **湍流特徵分析**：Q-準則渦流識別、λ2-準則分析、湍流動能時空分布
-  - 📐 **無量綱數分析**：Reynolds、Capillary、Bond、Péclet數即時追蹤與時序圖
-  - 🌊 **邊界層分析**：厚度計算、壁面剪應力分布、流動分離點檢測
-  - 🎯 **流動拓撲分析**：臨界點識別、分離線追蹤、渦流結構可視化
-  - 🗂️ **智能報告管理**：自動時間戳目錄 `report/{timestamp}/` 結構化輸出
-  - 📊 **多物理場綜合分析**：溫度-流動-壓力-相場統一視覺化
-  - 🎨 **動態範圍colorbar** (最新功能)：智能範圍調整，極值排除，統計信息展示
-  - 📈 **時序參數分析** (最新功能)：12個關鍵CFD參數演化追蹤，收斂狀態自動判斷
-  
-**專業診斷與監控**
-- **`lbm_diagnostics.py`** - LBM診斷監控系統 (500+行)
-  - 🔍 **數值品質監控**：時間穩定性、守恆定律檢驗、收斂性分析
-  - 📊 **統計數據追蹤**：循環緩衝區歷史數據管理，多層次監控頻率
-  - ⚡ **即時性能分析**：計算效率、記憶體使用、GPU利用率監控
-  - 🛡️ **穩定性預警**：異常檢測、發散預測、自動降級機制
-  - 📈 **專業CFD指標**：CFL數、Mach數、Reynolds數動態追蹤
-
-**統一視覺化管理**
-- **`visualizer.py`** - 統一視覺化管理器 (400+行)
-  - 🎮 即時3D監控界面，Taichi GUI直接渲染
-  - 🔄 多場統計數據獲取，標準化視覺化接口
-  - 📊 基礎視覺化功能：密度場、速度場、相場切面顯示
-
-**幾何模型專業製圖**
-- **`geometry_visualizer.py`** - 幾何模型視覺化工具 (300+行)
-  - 📐 V60濾杯專業製圖：尺寸標註、間隙分析、流體路徑
-  - ☕ 咖啡顆粒3D分布：散點圖、密度熱圖、統計分析
-  - 📊 顆粒大小分佈：直方圖、累積分佈、正態性檢驗
-  - 🏗️ 工程製圖標準：專業標註、材料特性、裝配關係
-
-### 🧪 全面測試系統 (tests/ - 85%+覆蓋率)
-
-**單元測試套件 (tests/unit/)**
-- 🔬 獨立模組功能驗證，確保每個組件正確性
-- ⚡ 快速反饋機制，開發過程即時品質保證
-
-**整合測試套件 (tests/integration/ - 4個核心測試)**
-- **`test_thermal_integration.py`** - 熱耦合系統完整測試
-- **`test_phase3_strong_coupling.py`** - Phase 3強耦合端到端驗證
-- **`test_weak_coupling.py`** - 弱耦合系統穩定性測試
-- **`enhanced_pressure_test.py`** - 增強壓力梯度系統驗證
-
-**專業模組測試**
-- **`test_lbm_solver_unit.py`** - LBM求解器單元測試，數值方法驗證
-- **`test_multiphase_flow.py`** - 多相流系統測試，界面動力學驗證
-- **`test_coffee_particles_extended.py`** - 擴展顆粒系統測試
-- **`test_filter_paper.py`** - 濾紙系統多孔介質流動測試
-- **`test_precise_pouring.py`** - 注水系統精度測試
-- **`test_boundary_conditions.py`** - 邊界條件正確性測試
-- **`test_pressure_gradient.py`** - 壓力梯度驅動效能測試
-- **`test_les_turbulence.py`** - LES湍流模型驗證
-- **`test_numerical_stability.py`** - 數值穩定性系統性測試
-- **`test_enhanced_viz.py`** - 增強視覺化報告系統測試
-- **`test_lbm_diagnostics.py`** - 診斷系統功能測試
-- **`test_visualizer.py`** - 基礎視覺化系統測試
-
-**性能基準測試 (tests/benchmarks/)**
-- 📈 系統性能基準建立，回歸檢測機制
-- ⚡ 多平台性能對比，優化效果量化評估
-
-### 📚 示例演示與基準測試
-
-**專業示例程式 (examples/)**
-- **`conservative_coupling_demo.py`** - 保守耦合演示 (400+行)
-  - 🎨 專業幾何分析視覺化：V60濾杯完整建模與尺寸驗證
-  - ☕ 咖啡顆粒分布分析：3D散點圖、密度熱圖、統計特性
-  - 📊 顆粒大小分佈：正態性檢驗、累積分佈、分層統計
-  - 🏗️ 工程製圖展示：專業標註、間隙分析、流體路徑
-  
-- **`convection_effect_demo.py`** - 對流效應演示
-  - 🌡️ 熱傳導效應可視化，溫度梯度驅動流動
-  - 🔥 自然對流現象展示，浮力效應分析
-  
-- **`detailed_coupling_demo.py`** - 詳細耦合演示  
-  - 🔗 完整物理耦合過程展示
-  - 📊 多物理場交互分析，耦合效應量化
-
-**性能基準測試 (benchmarks/)**
-- **`benchmark_suite.py`** - 標準性能測試套件 (300+行)
-  - 📈 系統性能評估：計算速度、記憶體效率、數值精度
-  - 🎯 多場景基準：不同網格尺寸、顆粒數量、物理複雜度
-  - 📊 跨平台對比：CPU vs GPU、不同硬體配置效能
-  
-- **`ultimate_benchmark_suite.py`** - 終極性能測試 (400+行)
-  - 🚀 極限負載測試：最大網格、最多顆粒、最複雜物理
-  - 💪 穩定性壓力測試：長時間運行、記憶體洩漏檢測
-  - 🔥 性能最佳化驗證：Apple Silicon vs NVIDIA vs CPU對比
-
-### 📖 技術文檔
-- **`docs/`** - 完整技術文檔系統
-  - **mathematical/**: 數學模型與方程式推導
-  - **physics/**: 物理建模細節  
-  - **performance/**: 性能分析報告
-  - **technical/**: 驗證與測試程序
-
-## 🔬 科學功能
-
-### 物理建模
-- **Navier-Stokes方程** - 格子玻爾茲曼法求解
-- **大渦模擬** (LES) - 湍流建模
-- **多相流動** - 表面張力效應
-- **多孔介質流** - 咖啡床滲透
-- **顆粒-流體耦合** - 咖啡顆粒互動
-- **🌡️ 熱流耦合** - 溫度場與流場耦合 (新功能)
-
-### 🆕 CFD工程師級分析
-- **壓力場分析**: 全面壓力梯度與損失分析
-- **湍流特徵**: Q-準則和λ2-準則渦流識別
-- **無量綱分析**: 即時Reynolds、Capillary、Bond、Péclet追蹤
-- **邊界層分析**: 壁面剪應力與分離檢測
-- **流動拓撲**: 臨界點識別與流動結構分析
-- **專業報告**: 自動生成研究級視覺化
-
-### 數值方法
-- **D3Q19速度模型** - 3D高精度
-- **BGK碰撞算子** - 含外力項
-- **Guo強迫方案** - 體積力處理
-- **反彈邊界** - 複雜幾何處理
-- **自適應時間步** - 穩定性保證
-
-## 📈 輸出與報告
-
-### 🆕 專業CFD報告
-每次模擬自動生成時間戳專業報告：
-
-```
-report/YYYYMMDD_HHMMSS/
-├── images/                                    # CFD專業分析圖片
-│   ├── cfd_pressure_analysis_step_XXXX.png        # 壓力場分析（動態範圍）
-│   ├── cfd_turbulence_analysis_step_XXXX.png      # 湍流特徵分析
-│   ├── cfd_dimensionless_analysis_step_XXXX.png   # 無量綱數分析
-│   ├── cfd_boundary_layer_analysis_step_XXXX.png  # 邊界層分析
-│   ├── velocity_analysis_step_XXXX.png             # 速度場分析
-│   ├── v60_longitudinal_analysis_step_XXXX.png     # V60縱向分析
-│   ├── combined_analysis_step_XXXX.png             # 綜合多物理場
-│   └── time_series_analysis_step_XXXX.png          # 🆕 時序參數分析
-├── geometry/                                  # 幾何模型分析
-│   ├── professional_cross_section_analysis.png    # 專業橫截面分析
-│   ├── professional_3d_geometry_model.png         # 3D工程模型
-│   ├── engineering_drawings.png                   # 工程製圖
-│   ├── coffee_particle_distribution.png           # 咖啡顆粒分布分析
-│   └── particle_size_distribution.png             # 顆粒大小分佈分析
-├── data/                                      # 🆕 數值數據輸出
-│   ├── time_series_data_step_XXXX.json            # 時序數據JSON
-│   └── statistics_step_XXXX.json                  # 統計數據
-└── analysis/                                  # 詳細分析報告
-```
-
-### 🎨 最新增強功能 (2025-08-19)
-
-#### **動態範圍colorbar系統**
-- **智能範圍調整**: 基於5-95%百分位自動調整colorbar範圍
-- **極值處理**: 排除極值干擾，突出數據細節
-- **統計信息**: 自動顯示平均值、標準差、最值等統計數據
-- **視覺優化**: 統一colorbar佈局，專業級圖表格式
-
-#### **時序參數分析系統**
-- **12個關鍵參數追蹤**:
-  - Reynolds數演化
-  - 壓力損失時序
-  - 最大/平均速度變化
-  - 湍流動能演化
-  - 多相流界面面積
-  - 壓力梯度變化
-  - 渦度強度
-  - 質量流率
-- **收斂狀態判斷**: 自動識別數值收斂，解決"多步結果相同"問題
-- **數據持久化**: JSON格式數據輸出，支援後續分析
-- **緩衝區管理**: 智能時序數據管理，防止記憶體溢出
-
-### 🆕 幾何視覺化功能
-- **V60幾何分析**: 濾杯濾紙完整建模、尺寸驗證、間隙分析
-- **咖啡顆粒分布**: 3D散點圖、密度熱圖、徑向分佈、角度分析
-- **顆粒大小分佈**: 統計直方圖、累積分佈、正態性檢驗、分層分析
-- **工程製圖**: 專業尺寸標註、流體路徑、間隙細節
-
-### 分析特色
-- **壓力分析**: 梯度場、壓力係數、損失計算
-- **湍流分析**: 渦流識別、湍流動能、耗散率
-- **無量綱數**: 關鍵流動參數時序追蹤
-- **邊界層**: 壁面效應、分離點、剪應力分佈
-
-## 📈 驗證與測試
-
-### 基準測試結果
-我們的實現已通過以下驗證：
-- ✅ 標準CFD基準測試 (空腔流、管道流)
-- ✅ 實驗咖啡沖煮數據
-- ✅ 多孔介質流動文獻值
-- ✅ 顆粒沉降實驗
-- ✅ 🌡️ 熱耦合系統測試 (85%+通過率)
-- ✅ Phase 3強耦合測試套件
-
-### 持續集成
-- 多Python版本自動測試
-- 性能回歸檢測
-- 代碼品質檢查 (flake8, mypy)
-- 覆蓋率報告 (85%+ 目標)
-
-## 🎛️ 配置設定
-
-### 🌡️ 模擬模式選擇 (新功能)
+### 🎯 Build/Test Commands
 ```bash
-# 基礎LBM模式 (穩定高效)
-python main.py debug 10 none basic
+# 完整模擬運行
+python main.py
 
-# 熱流耦合模式 (溫度-流動耦合) 
-python main.py debug 10 none thermal
+# 快速穩定性測試
+python main.py debug 5
 
-# Phase 3強耦合模式 (最高級物理建模)
-python main.py debug 10 none strong_coupled
+# 壓力梯度測試
+python main.py pressure density 100
+python main.py pressure force 100  
+python main.py pressure mixed 100
 
-# 專門熱耦合測試
-python main.py thermal thermal 10
+# 單獨測試模組
+python tests/test_lbm_diagnostics.py
+python tests/test_enhanced_viz.py
+
+# 幾何與視覺化
+python examples/conservative_coupling_demo.py
+python src/visualization/enhanced_visualizer.py
+
+# Phase 3強耦合測試
+python tests/integration/test_phase3_strong_coupling.py
+python tests/integration/test_thermal_integration.py
+
+# 性能基準測試
+python benchmarks/benchmark_suite.py
+python benchmarks/ultimate_benchmark_suite.py
+
+# 開發工具
+python tools/update_imports.py        # 更新import路徑
+python tools/fix_config_imports.py    # 修正config導入
+python tools/fix_test_imports.py      # 修正測試路徑
 ```
 
-### 核心參數配置
+## 🛡️ 開發狀態與限制
 
-`config.py` 關鍵參數：
+### ✅ 已實現功能
+- 基本LBM框架搭建
+- Taichi GPU並行基礎設施
+- 專案架構和模組化設計
+- 配置管理系統
+- 基礎視覺化功能
 
-```python
-# 網格解析度 (平衡精度與性能)
-NX = NY = NZ = 224
+### 🚧 開發中功能
+- 數值穩定性優化
+- 多相流界面處理
+- 顆粒-流體耦合算法
+- 熱傳導耦合實現
+- 湍流模型驗證
 
-# 物理參數
-POUR_RATE_ML_S = 4.0        # 注水速度 (ml/s)
-COFFEE_MASS_G = 20          # 咖啡量 (克)
-BREWING_TIME_SECONDS = 140  # 總沖煮時間
+### ⚠️ 已知限制
+- 部分測試模組需要路徑修正
+- 數值穩定性需進一步驗證
+- 性能最佳化尚未完成
+- 文檔可能與實際實現有差異
+- 跨平台兼容性未充分測試
 
-# 數值穩定性 (預校準)
-CFL_NUMBER = 0.010          # Courant數
-TAU_WATER = 0.800           # 鬆弛時間
-```
+### 🔬 研究方向
+- 數值方法穩定性分析
+- GPU記憶體布局最佳化
+- 物理模型準確性驗證
+- 計算效率改進
 
-### 🌡️ 熱流參數配置
+## 🔬 技術特色
 
-`config/thermal_config.py` 新增參數：
+### 🌊 流體力學建模
+- **D3Q19 LBM**: 基於格子玻爾茲曼方法的流場計算
+- **多相流研究**: 嘗試模擬水-空氣界面動力學
+- **邊界條件**: V60濾杯幾何形狀的數值處理
 
-```python
-# 熱物性參數
-INITIAL_TEMPERATURE = 95.0  # 初始水溫 (°C)
-AMBIENT_TEMPERATURE = 25.0  # 環境溫度 (°C)
-THERMAL_DIFFUSIVITY = 1.4e-7 # 熱擴散係數 (m²/s)
+### 🌀 湍流模擬探索
+- **LES建模**: 實驗性大渦模擬實現
+- **Smagorinsky模型**: 亞格子應力建模嘗試
+- **渦流識別**: Q-準則和λ2-準則的數值實驗
 
-# 熱邊界條件
-TEMPERATURE_INLET = 95.0    # 進口溫度 (°C)
-HEAT_LOSS_COEFFICIENT = 5.0 # 散熱係數 (W/m²K)
-```
+### ☕ 顆粒系統
+- **拉格朗日追蹤**: 咖啡顆粒運動軌跡計算
+- **顆粒-流體耦合**: 雙向作用力模型研究
+- **統計分析**: 顆粒分布和運動特性分析
 
-## 📚 技術文檔
+### 🌡️ 熱傳導耦合 (實驗性)
+- **溫度場計算**: 熱傳導方程數值求解
+- **流熱耦合**: 溫度對流動性質影響的研究
+- **自然對流**: 浮力驅動流動的模擬嘗試
 
-### 技術文檔
-- [主要技術論文](docs/technical/technical_paper.md) - 完整研究論文
-- [數學模型](docs/mathematical/mathematical_models.md) - 完整方程推導
-- [物理建模](docs/physics/physics_modeling.md) - 物理現象細節
-- [熱流發展計畫](docs/THERMAL_DEVELOPMENT_PLAN.md) - 熱流開發路線圖
-- [Phase 3分析](docs/THERMAL_PHASE3_ANALYSIS.md) - 強耦合系統分析
+## 🍎 平台支援與性能
 
-### 性能分析
-- [性能報告](docs/performance/performance_analysis.md) - 詳細基準測試
-- [依賴分析](docs/DEPENDENCY_ANALYSIS.md) - 系統依賴關係
-- [技術文檔](docs/技術文檔_完整物理建模.md) - 完整物理建模 (中文)
+### 開發環境
+- **主要平台**: macOS (Taichi Metal後端)
+- **理論支援**: Linux (CUDA), Windows (CUDA/CPU)
+- **GPU加速**: Apple Metal, NVIDIA CUDA (未充分測試)
+- **記憶體管理**: Taichi統一記憶體模型
 
-### 用戶指南
-- [快速入門](docs/README.md) - 5分鐘上手指南
-- [開發工具](tools/) - 項目開發維護工具
-- [備份管理](backups/) - 重要配置備份
+### 計算參數 (理論設計)
+- **計算域**: 224×224×224 格點
+- **物理域**: 14.0×14.0×14.0 cm 
+- **解析度**: 0.625 mm/格點
+- **時間步長**: 依CFL條件自適應
+- **記憶體需求**: 約2-4 GB (視配置而定)
 
-## 🏆 專案成就
+⚠️ **性能聲明**: 實際性能表現需根據具體硬體配置和參數設定進行驗證。
 
-### 技術卓越
-- **S級代碼品質** (100/100分)
-- **工業級穩定性** (100% 數值收斂)
-- **研究級性能** (159M+ 格點/秒)
-- **企業級測試** (85%+ 覆蓋率)
-- **🆕 CFD專業分析** (7種專業分析類型)
-- **🆕 自動報告生成** (智能時間戳目錄管理)
+## 📚 參考文獻
 
-### 學術影響
-- **53,000+字** 技術文檔
-- **255+數學方程式** 完整推導
-- **期刊級研究論文** 同行評議標準
-- **開源CFD教育** 資源
-- **🆕 專業CFD視覺化** (研究級分析圖表)
-- **🌡️ 熱流耦合系統** (溫度-流動完整建模)
-
-### 工程品質
-- 完整CI/CD流水線與GitHub Actions
-- 學術標準專業文檔
-- 全面測試套件與性能基準
-- 生產級錯誤處理與診斷
-- **🆕 企業級報告管理** (自動專業輸出)
+1. **格子玻爾茲曼方法**: Chen & Doolen (1998), Kruger et al. (2017)
+2. **多相流模型**: Jacqmin (1999), Lee & Fischer (2006)  
+3. **湍流建模**: Smagorinsky (1963), Germano et al. (1991)
+4. **數值穩定性**: He & Luo (1997), Lallemand & Luo (2000)
 
 ## 🤝 貢獻指南
 
-歡迎參與貢獻！請參考：
-- [貢獻指南](CONTRIBUTING.md)
-- [開發環境設置](docs/tutorials/development.md)
-- [代碼風格指南](docs/technical/coding_standards.md)
+1. Fork 專案
+2. 創建功能分支 (`git checkout -b feature/AmazingFeature`)
+3. 提交變更 (`git commit -m 'Add some AmazingFeature'`)
+4. 推送到分支 (`git push origin feature/AmazingFeature`)
+5. 開啟 Pull Request
 
-## 📄 引用方式
+## 📄 授權協議
 
-如在研究中使用本專案，請引用：
+本專案採用 MIT 授權協議 - 詳見 [LICENSE](LICENSE) 檔案
 
-```bibtex
-@software{pourover_cfd_2025,
-  title={三維格子玻爾茲曼手沖咖啡沖煮模擬系統},
-  author={Pour-Over CFD Team},
-  year={2025},
-  url={https://github.com/yourusername/pour-over-cfd},
-  note={使用 opencode 和 GitHub Copilot 開發}
-}
-```
+## 🙏 致謝
 
-## 📝 授權條款
-
-MIT License - 詳見 [LICENSE](LICENSE) 檔案
-
-## 🔗 相關專案
-
-- [Taichi Framework](https://github.com/taichi-dev/taichi) - GPU加速框架
-- [OpenFOAM](https://openfoam.org/) - 傳統CFD對比
-- [LBM Literature](docs/references/) - 學術背景資料
+- **OpenCode**: 提供強大的AI輔助開發環境
+- **GitHub Copilot**: 智能代碼生成與優化建議
+- **Taichi**: 高性能並行計算框架
+- **Apple**: Metal GPU計算平台
+- **咖啡社群**: 提供V60沖煮技術參考
 
 ---
 
-**"偉大的咖啡來自對沖煮物理的深入理解"** ☕
-
-*通過AI輔助開發實現S級品質標準的專業CFD模擬系統*
+**🔬 專業CFD模擬，☕ 精確咖啡科學 | Powered by OpenCode + GitHub Copilot**
