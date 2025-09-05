@@ -29,7 +29,7 @@ from dataclasses import dataclass
 # 核心模組
 from src.core.lbm_solver import LBMSolver
 from src.physics.thermal_lbm import ThermalLBM
-import config.config
+import config as config
 
 @dataclass
 class CouplingConfig:

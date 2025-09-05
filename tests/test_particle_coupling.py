@@ -8,7 +8,7 @@
 
 import taichi as ti
 import numpy as np
-import config.config
+import config as config
 from src.physics.coffee_particles import CoffeeParticleSystem
 from src.core.lbm_solver import LBMSolver
 from src.physics.filter_paper import FilterPaperSystem

@@ -6,7 +6,7 @@
 
 import taichi as ti
 import numpy as np
-import config.config
+import config as config
 from typing import Optional, Tuple
 from src.core.apple_silicon_optimizations import apple_optimizer
 if config.ENABLE_LES and config.RE_CHAR > config.LES_REYNOLDS_THRESHOLD:

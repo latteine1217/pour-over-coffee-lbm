@@ -22,7 +22,7 @@ import math
 from typing import Tuple, Dict, Optional, Any
 from dataclasses import dataclass
 
-import config.config
+import config as config
 from src.physics.temperature_dependent_properties import TemperatureDependentProperties
 
 @dataclass  

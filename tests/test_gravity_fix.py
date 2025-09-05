@@ -13,7 +13,7 @@ import numpy as np
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
 # 配置imports
-import config.config
+import config as config
 from config.init import init_taichi
 from src.core.lbm_solver import LBMSolver3D
 from src.physics.boundary_conditions import BoundaryConditionManager

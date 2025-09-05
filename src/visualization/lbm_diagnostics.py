@@ -8,7 +8,7 @@ import numpy as np
 import time
 from collections import deque, defaultdict
 from datetime import datetime
-import config.config
+import config as config
 
 class CircularBuffer:
     """循環緩衝區 - 高效歷史數據管理"""

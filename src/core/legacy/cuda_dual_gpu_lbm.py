@@ -6,7 +6,7 @@ CUDA雙GPU優化LBM求解器 - NVIDIA P100 * 2 並行計算
 
 import taichi as ti
 import numpy as np
-import config.config
+import config as config
 from typing import Optional, Tuple, List
 import time
 import pycuda.driver as cuda

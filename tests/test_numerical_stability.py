@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "")))
 import pytest
 import numpy as np
 import taichi as ti
-import config.config
+import config as config
 from src.core.numerical_stability import NumericalStabilityMonitor
 from src.core.lbm_solver import LBMSolver
 

@@ -7,7 +7,7 @@
 import taichi as ti
 import numpy as np
 import time
-import config.config
+import config as config
 
 @ti.data_oriented
 class UnifiedVisualizer:

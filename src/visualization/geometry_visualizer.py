@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 from datetime import datetime
 from scipy import stats
-import config.config
+import config as config
 from src.physics.coffee_particles import CoffeeParticleSystem
 from src.physics.filter_paper import FilterPaperSystem
 # Note: LBMSolver import removed - geometry visualizer doesn't need core solver

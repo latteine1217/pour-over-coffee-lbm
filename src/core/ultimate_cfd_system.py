@@ -12,7 +12,7 @@ import os
 # 添加項目根目錄到路徑
 sys.path.append(os.path.join(os.path.dirname(__file__), '../..'))
 
-import config.config
+import config as config
 import time
 from typing import Optional, Dict, Any
 

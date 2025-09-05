@@ -28,7 +28,7 @@
 from typing import Dict, Any, Protocol
 from abc import ABC, abstractmethod
 import taichi as ti
-import config.config
+import config as config
 
 class LBMSolverProtocol(Protocol):
     """LBM求解器協議定義，用於類型檢查"""

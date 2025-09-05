@@ -29,7 +29,7 @@ from src.core.lbm_solver import LBMSolver
 from src.physics.thermal_lbm import ThermalLBM
 from src.physics.temperature_dependent_properties import TemperatureDependentProperties, create_water_properties
 from src.physics.buoyancy_natural_convection import BuoyancyNaturalConvection, create_coffee_buoyancy_system
-import config.config
+import config as config
 
 @dataclass
 class StrongCouplingConfig:

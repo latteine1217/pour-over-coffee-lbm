@@ -18,7 +18,7 @@ import taichi as ti
 import numpy as np
 import math
 from typing import Tuple, Optional
-from config.config import NX, NY, NZ, DX, DT, CS2
+from config import NX, NY, NZ, DX, DT, CS2
 
 # ==============================================
 # D3Q7格子結構定義

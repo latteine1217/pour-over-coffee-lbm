@@ -53,6 +53,27 @@ jobs:
         flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics --exclude=.backup_archive,backups
         # 使用配置文件進行完整檢查（但不強制失敗）
         flake8 . --count --exit-zero --statistics
+
+    - name: Install ripgrep for policy checks
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y ripgrep
+
+    - name: Enforce import policies (no legacy paths, no config.config)
+      run: |
+        set -e
+        echo "Checking for forbidden legacy imports..."
+        if rg -n "from\\s+src\\.core\\.legacy\\.|import\\s+src\\.core\\.legacy\\." -S .; then
+          echo "❌ Forbidden legacy imports found" && exit 1
+        else
+          echo "✅ No legacy imports"
+        fi
+        echo "Checking for deprecated config imports..."
+        if rg -n "import\\s+config\\.config(\\s|$)" -S .; then
+          echo "❌ Deprecated config.config imports found" && exit 1
+        else
+          echo "✅ No deprecated config.config imports"
+        fi
         
     - name: Type checking with mypy
       run: |

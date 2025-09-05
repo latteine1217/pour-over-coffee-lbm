@@ -15,7 +15,7 @@ import os
 # 導入必要的模組
 sys.path.append('.')
 from main import CoffeeSimulation
-import config.config
+import config as config
 
 def test_diagnostics_functionality():
     """測試診斷系統功能完整性"""

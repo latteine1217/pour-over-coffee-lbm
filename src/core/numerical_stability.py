@@ -8,7 +8,7 @@
 
 import taichi as ti
 import numpy as np
-import config.config
+import config as config
 from config.init import initialize_taichi_once
 
 # 確保Taichi已正確初始化

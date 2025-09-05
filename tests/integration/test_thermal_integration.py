@@ -37,7 +37,7 @@ def test_thermal_system_integration():
     # 初始化系統組件 (使用全域網格尺寸)
     print("  🚀 初始化系統組件...")
     
-    from config.config import NX, NY, NZ
+    from config import NX, NY, NZ
     thermal_solver = ThermalLBM(thermal_diffusivity=1.66e-7)  # 93°C水的熱擴散係數
     property_manager = ThermalPropertyManager(nx=NX, ny=NY, nz=NZ)  # 使用一致的網格尺寸
     

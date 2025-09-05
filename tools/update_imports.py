@@ -94,6 +94,8 @@ def main():
         'config': 'config.config',
         'thermal_config': 'config.thermal_config',
         'init': 'config.init',
+        # 統一配置入口：將相容層導入改為統一入口
+        'config.config': 'config',
     }
     
     # 需要更新的文件列表
