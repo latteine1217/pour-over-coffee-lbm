@@ -20,6 +20,24 @@ docs/
 
 ### 📖 主要文檔列表
 
+#### 🧩 相容層方法與遷移指南（Compatibility Layer & Migration）
+- 目標：在維持既有測試與舊代碼可用的同時，逐步遷移至統一且語義清晰的API。
+- 邊界條件管理（src/physics/boundary_conditions.py）
+  - 相容方法：
+    - BoundaryConditionManager.apply(solver) → 等價於 apply_all_boundaries(solver)
+    - BoundaryConditionManager.apply_fallback(solver) → 失敗時回傳 False，不再丟出異常
+  - 建議新代碼：
+    - 優先使用 apply_all_boundaries(solver)
+- 數值穩定（src/core/numerical_stability.py）
+  - 相容方法：
+    - NumericalStabilityMonitor.check_stability(solver) → 回傳布林（穩定/不穩定）
+    - NumericalStabilityMonitor.get_statistics() → 回傳簡化統計（max_velocity/min/max_density 等）
+  - 建議新代碼：
+    - 優先使用 diagnose_stability(solver, step) 取得完整報告（含狀態與數值指標）
+- 描述：
+  - 以上相容方法將在未來版本標註為 deprecated；
+    請在新功能與重構中逐步替換為統一接口。
+
 #### 🔬 **理論基礎**
 - [`technical_paper.md`](technical/technical_paper.md) - 技術實現論文草稿
 - [`mathematical_models.md`](mathematical/mathematical_models.md) - 數學模型推導

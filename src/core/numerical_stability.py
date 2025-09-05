@@ -16,7 +16,13 @@ initialize_taichi_once()
 
 @ti.data_oriented
 class NumericalStabilityMonitor:
-    """數值穩定性監控器"""
+    """數值穩定性監控器
+
+    相容層說明（Compatibility Layer）:
+    - 新代碼請優先使用 diagnose_stability() 取得完整報告；
+      check_stability() 與 get_statistics() 提供與既有測試相容的簡化介面。
+    - 未來可能將 check_stability()/get_statistics() 標註為 deprecated。
+    """
     
     def __init__(self):
         """初始化穩定性監控器"""
@@ -103,6 +109,18 @@ class NumericalStabilityMonitor:
         
         return status
     
+    def check_stability(self, solver) -> bool:
+        """
+        向後相容（Compatibility Layer）：提供簡化的穩定性布林檢查介面。
+        - 回傳 True 表示穩定，False 表示需要關注。
+        - 建議新代碼改用 diagnose_stability() 取得完整報告。
+        """
+        try:
+            status = self.check_field_stability(solver)
+            return status == 0
+        except Exception:
+            return False
+
     def diagnose_stability(self, solver, step: int) -> dict:
         """
         執行完整的穩定性診斷
@@ -178,6 +196,29 @@ class NumericalStabilityMonitor:
                         solver.f[q, i, j, k] = solver._compute_stable_equilibrium(
                             q, rho_safe, u_safe)
     
+    def get_statistics(self) -> dict:
+        """
+        向後相容（Compatibility Layer）：回傳目前監控器統計數據（簡化版）。
+        - 用於符合既有測試的介面；新代碼建議使用 diagnose_stability() 的回傳值。
+        """
+        try:
+            return {
+                'max_velocity': float(self.max_velocity[None]),
+                'min_density': float(self.min_density[None]),
+                'max_density': float(self.max_density[None]),
+                'nan_count': int(self.nan_count[None]),
+                'inf_count': int(self.inf_count[None])
+            }
+        except Exception:
+            # 若尚未計算，回傳安全預設
+            return {
+                'max_velocity': 0.0,
+                'min_density': 1.0,
+                'max_density': 1.0,
+                'nan_count': 0,
+                'inf_count': 0
+            }
+
     def print_stability_report(self, report: dict):
         """打印穩定性報告"""
         step = report['step']
