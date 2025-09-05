@@ -27,9 +27,9 @@ from typing import Tuple, Optional, Dict, Any
 from dataclasses import dataclass
 
 # 核心模組
-from src.core.lbm_solver import LBMSolver
+from src.core.legacy.lbm_solver import LBMSolver
 from src.physics.thermal_lbm import ThermalLBM
-import config.config as config
+import config
 
 @dataclass
 class CouplingConfig:

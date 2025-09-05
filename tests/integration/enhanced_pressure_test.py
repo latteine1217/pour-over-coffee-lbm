@@ -13,7 +13,7 @@ import numpy as np
 from config.init import initialize_taichi_once
 initialize_taichi_once()
 
-import config.config as config
+import config
 from main import CoffeeSimulation, setup_pressure_drive
 
 def test_enhanced_mode(mode, steps=50):

@@ -16,7 +16,7 @@ import time
 from config.init import initialize_taichi_once
 initialize_taichi_once()
 
-import config.config as config
+import config
 
 def test_pressure_mode(mode, steps=20):
     """測試特定壓力驅動模式"""

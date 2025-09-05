@@ -14,7 +14,7 @@ import os
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 # 導入核心模組
-import config.config as config
+import config
 from src.core.lbm_solver import LBMSolver
 from src.physics.coffee_particles import CoffeeParticleSystem
 from src.physics.filter_paper import FilterPaperSystem

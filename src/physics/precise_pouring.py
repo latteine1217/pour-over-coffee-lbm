@@ -7,7 +7,7 @@
 
 import taichi as ti
 import numpy as np
-import config.config as config
+import config
 
 @ti.data_oriented
 class PrecisePouringSystem:

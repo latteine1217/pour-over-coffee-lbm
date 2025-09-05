@@ -1,31 +1,31 @@
-# config/physics.py - 物理參數統一配置
+# physics_config.py - 物理常數與材料參數配置
 """
-物理常數與材料參數配置 - 統一版本
+物理常數與材料參數配置
 包含所有流體物性、幾何參數、無量綱數計算
 
-解決了原始衝突：
-- 統一溫度參數 (90°C水溫標準)
-- 消除重複定義
-- 統一依賴核心配置
+與core_config.py分離，專注於物理模型參數
+確保物理參數的一致性和可追溯性
 
 開發：opencode + GitHub Copilot
 """
 
 import math
 import numpy as np
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# 從統一核心配置導入基礎參數
-from config.core import (
+from config.core_config import (
     NX, NY, NZ, SCALE_LENGTH, SCALE_TIME, SCALE_VELOCITY,
-    CS2, TAU_FLUID, TAU_AIR, CFL_NUMBER, PHYSICAL_DOMAIN_SIZE
+    CS2, TAU_FLUID, TAU_AIR, CFL_NUMBER
 )
 
 # ==============================================
-# 標準溫度與物理常數 - 解決衝突
+# 標準溫度與物理常數
 # ==============================================
 
-# 標準工作溫度 (°C) - 統一為90°C
-WATER_TEMP_C = 90.0            # 90°C熱水 (咖啡沖煮標準溫度)
+# 標準工作溫度 (°C)
+WATER_TEMP_C = 90.0            # 90°C熱水 (標準手沖溫度)
 AMBIENT_TEMP_C = 25.0          # 環境溫度
 COFFEE_INITIAL_TEMP_C = 25.0   # 咖啡粉初始溫度
 
@@ -75,7 +75,6 @@ COFFEE_POWDER_MASS = 0.02              # 20g
 COFFEE_POROSITY = 0.45                 # 孔隙率
 COFFEE_PARTICLE_DIAMETER = 6.5e-4      # 0.65mm
 COFFEE_PARTICLE_RADIUS = COFFEE_PARTICLE_DIAMETER / 2
-PARTICLE_DIAMETER_MM = 0.65             # 咖啡顆粒直徑 (mm) - FilterPaper & GeometryViz需求
 
 # 注水參數
 POUR_RATE_ML_S = 4.0                   # 4 ml/s
@@ -87,17 +86,6 @@ BREWING_TIME_SECONDS = 140             # 2:20
 POUR_HEIGHT_CM = 12.5                  # 注水高度
 INLET_DIAMETER_M = 0.005               # 入水直徑 (0.5 cm)
 NOZZLE_DIAMETER_M = 0.005              # 噴嘴直徑上限
-
-# 重力加速修正（用於速度推導）
-GRAVITY_CORRECTION = 0.05              # 5%重力修正
-
-# 注水面積計算 (PrecisePouring系統需求)
-def compute_inlet_area():
-    """計算注水截面積 (m²)"""
-    effective_diameter = min(INLET_DIAMETER_M, NOZZLE_DIAMETER_M)
-    return math.pi * (effective_diameter / 2.0) ** 2
-
-INLET_AREA = compute_inlet_area()      # 注水截面積 (m²)
 
 # ==============================================
 # 尺度轉換與無量綱化
@@ -118,54 +106,16 @@ RHO_AIR = AIR_DENSITY_20C / WATER_DENSITY_90C    # 真實密度比 (~0.00125)
 NU_WATER_LU = WATER_VISCOSITY_90C * SCALE_TIME / (SCALE_LENGTH**2)
 NU_AIR_LU = AIR_VISCOSITY_20C * SCALE_TIME / (SCALE_LENGTH**2)
 
-# ==============================================
-# Phase 1 智能參數驗證與穩定性修正
-# ==============================================
+# 驗證鬆弛時間一致性 (與core_config一致)
+TAU_WATER_CALCULATED = NU_WATER_LU / CS2 + 0.5
+TAU_AIR_CALCULATED = NU_AIR_LU / CS2 + 0.5
 
-def validate_and_correct_relaxation_times():
-    """智能鬆弛時間驗證與修正 - Phase 1"""
-    
-    # 計算物理真實值
-    tau_water_calculated = NU_WATER_LU / CS2 + 0.5
-    tau_air_calculated = NU_AIR_LU / CS2 + 0.5
-    
-    corrections = []
-    
-    # 水相鬆弛時間分析
-    water_deviation = abs(tau_water_calculated - TAU_FLUID) / TAU_FLUID * 100
-    if water_deviation > 10:  # 10%偏差閾值
-        corrections.append(f"水相: 物理值{tau_water_calculated:.3f} → 穩定值{TAU_FLUID:.3f} (偏差{water_deviation:.1f}%)")
-    else:
-        corrections.append(f"水相: 鬆弛時間一致性良好 (偏差{water_deviation:.1f}%)")
-    
-    # 氣相鬆弛時間分析 
-    air_deviation = abs(tau_air_calculated - TAU_AIR) / TAU_AIR * 100
-    if air_deviation > 10:  # 10%偏差閾值
-        corrections.append(f"氣相: 物理值{tau_air_calculated:.3f} → 穩定值{TAU_AIR:.3f} (偏差{air_deviation:.1f}%)")
-    else:
-        corrections.append(f"氣相: 鬆弛時間一致性良好 (偏差{air_deviation:.1f}%)")
-    
-    # 穩定性優先級說明
-    print("🔧 Phase 1 穩定性優先修正:")
-    for correction in corrections:
-        if "→" in correction:
-            print(f"   修正: {correction}")
-        else:
-            print(f"   ✅ {correction}")
-    
-    print("ℹ️  設計邏輯: 數值穩定性 > 物理精度，確保100%收斂保證")
-    
-    return {
-        'water_physical': tau_water_calculated,
-        'water_used': TAU_FLUID,
-        'air_physical': tau_air_calculated, 
-        'air_used': TAU_AIR,
-        'water_deviation': water_deviation,
-        'air_deviation': air_deviation
-    }
+# 使用core_config的安全值，但驗證一致性
+if abs(TAU_WATER_CALCULATED - TAU_FLUID) > 0.1:
+    print(f"⚠️  水相鬆弛時間不一致: 計算值{TAU_WATER_CALCULATED:.3f} vs 核心值{TAU_FLUID:.3f}")
 
-# 執行智能驗證
-relaxation_analysis = validate_and_correct_relaxation_times()
+if abs(TAU_AIR_CALCULATED - TAU_AIR) > 0.1:
+    print(f"⚠️  氣相鬆弛時間不一致: 計算值{TAU_AIR_CALCULATED:.3f} vs 核心值{TAU_AIR:.3f}")
 
 # ==============================================
 # 重力與表面張力
@@ -389,8 +339,7 @@ def get_physics_summary():
             'water_viscosity': WATER_VISCOSITY_90C,
             'air_density': AIR_DENSITY_20C,
             'air_viscosity': AIR_VISCOSITY_20C,
-            'density_ratio': RHO_AIR,
-            'water_temperature': WATER_TEMP_C
+            'density_ratio': RHO_AIR
         },
         'geometry': {
             'cup_height': CUP_HEIGHT,
@@ -416,4 +365,4 @@ else:
     if MACH_NUMBER > 0.3:
         print(f"⚠️  物理配置警告: Mach數過高 ({MACH_NUMBER:.3f})")
     else:
-        print(f"✅ 物理配置載入成功 (T={WATER_TEMP_C:.0f}°C, Re={RE_CHAR:.0f}, Ma={MACH_NUMBER:.3f})")
+        print(f"✅ 物理配置載入成功 (Re={RE_CHAR:.0f}, Ma={MACH_NUMBER:.3f})")

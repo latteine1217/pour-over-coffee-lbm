@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "")))
 import unittest
 import numpy as np
 import taichi as ti
-import config.config as config
+import config
 from src.physics.coffee_particles import CoffeeParticleSystem
 
 class TestCoffeeParticlesExtended(unittest.TestCase):

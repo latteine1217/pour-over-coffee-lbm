@@ -19,36 +19,38 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 import numpy as np
 import taichi as ti
 
-# 本地模組導入 - Phase 1統一配置遷移
+# 本地模組導入 - 修復導入路徑
 try:
-    # ✅ 直接使用統一配置系統 (Phase 1重構版本)
-    import config
-    print("✅ 載入統一配置系統 (Phase 1)")
+    # 優先嘗試從config.config導入 
+    import config.config as config
 except ImportError:
-    print("❌ 無法導入統一配置模組")
-    sys.exit(1)
+    # 回退方案：直接從config導入
+    try:
+        from config import config
+    except ImportError:
+        print("❌ 無法導入config模組")
+        sys.exit(1)
 
-# ✅ 統一配置系統已包含所有必要參數，無需額外覆寫
-print(f"🔧 配置摘要: {config.NX}×{config.NY}×{config.NZ}網格, CFL={config.CFL_NUMBER:.3f}")
-
-# 系統初始化 - 使用統一配置的初始化函數
+# 讀取 YAML 統一設定（在載入求解器前套用允許的覆寫）
 try:
-    # ✅ 優先使用統一配置的Taichi初始化
+    from config.config_manager import apply_overrides as _apply_cfg_overrides
+    _apply_cfg_overrides(config)
+except Exception as _e:
+    print(f"⚠️  YAML設定載入略過: {_e}")
+
+# 系統初始化
+try:
     from config.init import initialize_taichi_once
-    print("✅ 使用統一配置的Taichi初始化")
 except ImportError:
-    # 回退方案：手動初始化
-    print("⚠️  使用手動Taichi初始化")
-    def initialize_taichi_once():
-        import taichi as ti
-        # 簡單檢查避免重複初始化
-        try:
-            # 嘗試訪問ti的屬性來檢查是否已初始化
-            ti.lang.impl.current_cfg()
-            print("   Taichi已初始化")
-        except:
-            ti.init(arch=ti.gpu, device_memory_fraction=0.8)
-            print("   Taichi初始化完成")
+    try:
+        from config.core import initialize_taichi_once
+    except ImportError:
+        print("⚠️  Taichi初始化函數導入失敗，使用手動初始化")
+        def initialize_taichi_once():
+            import taichi as ti
+            if not hasattr(ti, '_initialized') or not ti._initialized:
+                ti.init(arch=ti.gpu, device_memory_fraction=0.8)
+                ti._initialized = True
 
 # 核心求解器導入
 try:
@@ -56,7 +58,7 @@ try:
 except ImportError:
     print("❌ UnifiedLBMSolver導入失敗 - 使用舊版求解器")
     try:
-        from src.core.legacy.lbm_solver import LBMSolver as UnifiedLBMSolver
+        from src.core.legacy.lbm_solver import LBMSolver3D as UnifiedLBMSolver
     except ImportError:
         print("❌ 無法導入任何LBM求解器")
         sys.exit(1)
@@ -582,8 +584,8 @@ class CoffeeSimulation:
                 raw_solver = UnifiedLBMSolver(preferred_backend='auto')
                 self.solver_type = f"統一LBM (回退-{getattr(raw_solver, 'current_backend', 'auto')})"
             except Exception:
-                from src.core.legacy.lbm_solver import LBMSolver
-                raw_solver = LBMSolver()
+                from src.core.legacy.lbm_solver import LBMSolver3D
+                raw_solver = LBMSolver3D()
                 self.solver_type = "舊版LBM (回退)"
         
         # 使用最小開銷適配器包裝求解器
@@ -597,7 +599,7 @@ class CoffeeSimulation:
         print("🔧 階段0：CFD一致性檢查...")
         # === 階段0：CFD參數一致性驗證 ===
         try:
-            config.check_parameter_consistency()
+            config.validate_parameter_consistency()
             print("   ✅ CFD參數一致性檢查通過")
         except Exception as e:
             print(f"   ⚠️  CFD參數一致性警告: {e}")
@@ -826,9 +828,11 @@ class CoffeeSimulation:
         # 濾紙系統更新（如果有相關方法）
         if self.filter_paper:
             try:
-                # 使用正確的方法名稱 update_dynamic_resistance
-                if hasattr(self.filter_paper, 'update_dynamic_resistance'):
-                    self.filter_paper.update_dynamic_resistance()
+                # 檢查是否有update_flow_through_filter方法，如果沒有則跳過
+                if hasattr(self.filter_paper, 'update_flow_through_filter'):
+                    self.filter_paper.update_flow_through_filter()
+                elif hasattr(self.filter_paper, 'update_flow'):
+                    self.filter_paper.update_flow()
                 # 如果沒有更新方法，默默跳過
             except Exception as e:
                 if self.step_count % 100 == 0:
@@ -1190,12 +1194,12 @@ class CoffeeSimulation:
             # 使用numpy直接保存數據
             import numpy as np
             
-            if hasattr(self.lbm, 'rho') and self.lbm.rho is not None:
+            if hasattr(self.lbm, 'rho'):
                 rho_data = self.lbm.rho.to_numpy()
                 np.save(f"{filename_base}_density_data.npy", rho_data)
                 print(f"   └─ 密度數據已保存: {filename_base}_density_data.npy")
             
-            if hasattr(self.lbm, 'u') and self.lbm.u is not None:
+            if hasattr(self.lbm, 'u'):
                 u_data = self.lbm.u.to_numpy()
                 u_mag = np.sqrt(u_data[:,:,:,0]**2 + u_data[:,:,:,1]**2 + u_data[:,:,:,2]**2)
                 np.save(f"{filename_base}_velocity_data.npy", u_mag)

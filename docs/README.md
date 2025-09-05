@@ -1,75 +1,65 @@
-# 📚 Pour-Over CFD Simulation - 論文級技術文檔
+# 📚 Pour-Over CFD Simulation - 技術文檔
 
-## 🎯 文檔架構概覽
+## 🎯 文檔系統概覽
 
-本目錄包含V60手沖咖啡LBM模擬系統的完整學術級技術文檔，適用於同行評議、學術發表和深度技術研究。
+本目錄包含V60手沖咖啡LBM模擬系統的技術文檔，專注於研究開發過程的記錄和理論基礎的整理。
+
+⚠️ **重要說明**: 本專案處於實驗開發階段，文檔內容可能與實際實現存在差異，請以程式碼為準。
 
 ### 📁 文檔組織結構
 
 ```
 docs/
-├── technical/          # 核心技術論文
-├── mathematical/       # 數學模型與公式
-├── physics/            # 物理建模詳述  
-├── numerical/          # 數值方法實現
-├── performance/        # 性能分析報告
-├── validation/         # 驗證與測試
-├── tutorials/          # 使用教程指南
-├── figures/            # 圖表與視覺化
-├── references/         # 參考文獻
-└── 🌡️ thermal/        # 熱流耦合系統文檔 (新增)
+├── technical/          # 技術實現文檔
+├── mathematical/       # 數學模型與理論
+├── physics/            # 物理建模方法  
+├── performance/        # 性能分析與測試
+├── CI_CD_GUIDE.md     # 開發流程指南
+└── 技術文檔_完整物理建模.md  # 中文技術總結
 ```
 
 ### 📖 主要文檔列表
 
-#### 🔬 **核心技術文檔**
-- [`technical_paper.md`](technical/technical_paper.md) - 主要技術論文
-- [`mathematical_models.md`](mathematical/mathematical_models.md) - 數學模型詳述
-- [`physics_modeling.md`](physics/physics_modeling.md) - 物理建模原理
-
-#### 🌡️ **熱流耦合系統** (新增)
-- [`THERMAL_DEVELOPMENT_PLAN.md`](THERMAL_DEVELOPMENT_PLAN.md) - 熱流開發計畫與完成狀態
-- [`THERMAL_PHASE3_ANALYSIS.md`](THERMAL_PHASE3_ANALYSIS.md) - Phase 3強耦合技術分析
-- 熱流耦合數學模型與實現細節
+#### 🔬 **理論基礎**
+- [`technical_paper.md`](technical/technical_paper.md) - 技術實現論文草稿
+- [`mathematical_models.md`](mathematical/mathematical_models.md) - 數學模型推導
+- [`physics_modeling.md`](physics/physics_modeling.md) - 物理建模方法
 
 #### 📊 **實現與分析**
-- [`numerical_methods.md`](numerical/numerical_methods.md) - 數值方法實現
-- [`performance_analysis.md`](performance/performance_analysis.md) - 性能分析報告
-- [`validation_testing.md`](validation/validation_testing.md) - 驗證與測試
-- [`DEPENDENCY_ANALYSIS.md`](DEPENDENCY_ANALYSIS.md) - 系統依賴關係分析
+- [`performance_analysis.md`](performance/performance_analysis.md) - 性能測試記錄
+- [`CI_CD_GUIDE.md`](CI_CD_GUIDE.md) - 開發環境配置指南
 
-#### 🔧 **開發維護**
-- [`CI_CD_GUIDE.md`](CI_CD_GUIDE.md) - CI/CD配置與故障排除指南
+#### 📚 **綜合文檔**
+- [`技術文檔_完整物理建模.md`](技術文檔_完整物理建模.md) - 中文版技術總結
 
-#### 📚 **使用指南**
-- [`user_guide.md`](tutorials/user_guide.md) - 完整使用手冊
-- [`quick_start.md`](tutorials/quick_start.md) - 快速開始指南
-- [`advanced_usage.md`](tutorials/advanced_usage.md) - 高級使用技巧
+### 🔬 文檔品質說明
 
-### 🏆 文檔品質標準
+- **研究性質**: 以探索和實驗為主的技術記錄
+- **理論基礎**: 基於已發表的學術文獻和標準方法
+- **實驗記錄**: 開發過程中的測試和驗證結果
+- **持續更新**: 隨著專案進展不斷修正和補充
 
-- **學術嚴謹性**: 符合同行評議期刊標準
-- **數學精確性**: 完整的推導過程和公式驗證
-- **實驗可重現**: 詳細的實驗步驟和參數設定
-- **工程實用性**: 實際應用指導和最佳實踐
-- **🌡️ 熱流耦合**: 完整的溫度-流動雙向耦合建模
-- **🔧 CI/CD完備**: 全自動化測試與部署流程
+### ⚠️ 使用注意事項
+
+1. **實驗階段**: 本專案仍在開發中，功能和性能可能不穩定
+2. **文檔一致性**: 部分文檔可能反映理想狀態，實際實現可能有差異
+3. **驗證需求**: 使用前請對關鍵功能進行獨立驗證
+4. **研究目的**: 主要用於學習和研究，非生產環境使用
 
 ### 🔗 相關資源
 
-- [主專案README](../README.md)
-- [API文檔](api/)
-- [基準測試報告](../benchmark_results/)
-- [GitHub代碼庫](https://github.com/user/pour-over)
+- [主專案README](../README.md) - 專案基本信息
+- [源碼目錄](../src/) - 實際實現代碼
+- [測試系統](../tests/) - 功能驗證測試
+- [配置系統](../config/) - 參數配置管理
 
-### 📧 學術合作
+### 📧 貢獻與反饋
 
-如需學術合作或引用本研究，請聯繫：
-- 技術問題：參考代碼註釋和測試用例
-- 學術討論：通過GitHub Issues
-- 商業合作：參考LICENSE文件
+- **技術問題**: 通過代碼註釋和測試用例了解實現細節
+- **文檔更新**: 發現不一致處請提出修正建議
+- **學術討論**: 歡迎就理論方法進行交流
 
 ---
-**開發工具**: 使用 [opencode](https://opencode.ai) + GitHub Copilot 開發
-**最後更新**: 2025年7月25日 - 熱流耦合系統完成
-**重大成就**: ✅ Phase 3強耦合實現 | ✅ CI/CD完全修復 | ✅ 85%+測試覆蓋率
+**開發工具**: 使用 [OpenCode](https://github.com/sst/opencode) + GitHub Copilot 開發  
+**文檔狀態**: 實驗性專案文檔 - 持續更新中  
+**最後更新**: 2025年8月25日 - 根據實際狀況調整描述

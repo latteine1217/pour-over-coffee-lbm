@@ -6,7 +6,7 @@ CPU計算後端 - 參考實現
 
 import taichi as ti
 import numpy as np
-import config.config as config
+import config
 from typing import Dict, Any, Optional
 from abc import ABC, abstractmethod
 

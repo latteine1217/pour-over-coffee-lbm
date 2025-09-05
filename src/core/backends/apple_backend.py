@@ -6,7 +6,7 @@ Apple Silicon計算後端 - Metal GPU深度優化
 
 import taichi as ti
 import numpy as np
-import config.config as config
+import config
 from typing import Dict, Any, Optional
 from abc import ABC, abstractmethod
 import time
@@ -61,6 +61,10 @@ class AppleBackend(ComputeBackend):
         # 檢測Apple Silicon平台
         self.is_apple_silicon = self._detect_apple_silicon()
         self.block_dim = getattr(config, 'APPLE_BLOCK_DIM', 128)
+        
+        # 詳細輸出控制 - 只在初始化時顯示詳細信息
+        self.verbose_mode = True  # 初始化時啟用詳細輸出
+        self._first_execution = True  # 第一次執行標誌
         
         # 性能監控
         self.performance_metrics = {
@@ -251,7 +255,8 @@ class AppleBackend(ComputeBackend):
         tau = params.get('tau', 0.6)
         
         # Apple Silicon三階段優化執行
-        print("🍎 執行Apple Silicon collision-streaming...")
+        if self._first_execution:
+            print("🍎 執行Apple Silicon collision-streaming...")
         
         # 獲取場變數 (適配不同記憶體布局)
         f = getattr(memory_adapter, 'f', None)
@@ -264,15 +269,40 @@ class AppleBackend(ComputeBackend):
             print("⚠️ 記憶體適配器場變數不可用")
             return
         
-        # Phase 1: Metal GPU collision
-        collision_start = time.time()
-        self._apple_collision_kernel(f, f_new, rho, u, solid, tau)
-        self.performance_metrics['collision_time'] = time.time() - collision_start
+        # 檢查場變數類型 - 修正Taichi field識別邏輯
+        # Taichi field 具有 shape 屬性，Python list 沒有
+        is_taichi_field = hasattr(f, 'shape') and hasattr(f_new, 'shape')
+        is_soa_format = isinstance(f, list) and isinstance(f_new, list)
         
-        # Phase 2: 統一記憶體streaming  
-        streaming_start = time.time()
-        self._apple_streaming_kernel(f, f_new)
-        self.performance_metrics['streaming_time'] = time.time() - streaming_start
+        if is_soa_format and self._first_execution:
+            print("🍎 檢測到SoA格式，使用逐個field處理...")
+            self._first_execution = False
+            # Phase 1: SoA collision - 逐個處理每個方向
+            collision_start = time.time()
+            self._process_soa_collision(f, f_new, rho, u, solid, tau)
+            self.performance_metrics['collision_time'] = time.time() - collision_start
+            
+            # Phase 2: SoA streaming - 逐個處理每個方向
+            streaming_start = time.time()
+            self._process_soa_streaming(f, f_new)
+            self.performance_metrics['streaming_time'] = time.time() - streaming_start
+        elif is_taichi_field:
+            if self._first_execution:
+                print("🍎 檢測到標準Taichi場，使用標準kernel...")
+                self._first_execution = False
+                
+            # Phase 1: Metal GPU collision (直接使用Taichi field)
+            collision_start = time.time()
+            self._apple_collision_kernel(f, f_new, rho, u, solid, tau)
+            self.performance_metrics['collision_time'] = time.time() - collision_start
+            
+            # Phase 2: 統一記憶體streaming  
+            streaming_start = time.time()
+            self._apple_streaming_kernel(f, f_new)
+            self.performance_metrics['streaming_time'] = time.time() - streaming_start
+        else:
+            print(f"⚠️ 未知的場變數格式: f類型={type(f)}, f_new類型={type(f_new)}")
+            return
         
         # Metal GPU同步
         ti.sync()
@@ -381,6 +411,106 @@ class AppleBackend(ComputeBackend):
         if not self.is_apple_silicon:
             raise RuntimeError("當前平台不是Apple Silicon，無法使用Apple後端")
         return True
+    
+    def _process_soa_collision(self, f_list, f_new_list, rho, u, solid, tau):
+        """處理SoA格式的collision步驟"""
+        # 第一步：重置巨觀量
+        self._reset_macroscopic(rho, u, solid)
+        
+        # 第二步：累積密度和動量
+        for q in range(len(f_list)):
+            self._accumulate_density_momentum(f_list[q], rho, u, solid, q)
+        
+        # 第三步：正規化速度
+        self._normalize_velocity(rho, u, solid)
+        
+        # 第四步：執行collision
+        for q in range(len(f_list)):
+            self._single_direction_collision(f_list[q], f_new_list[q], rho, u, solid, tau, q)
+    
+    def _process_soa_streaming(self, f_list, f_new_list):
+        """處理SoA格式的streaming步驟"""
+        for q in range(len(f_list)):
+            self._single_direction_streaming(f_list[q], f_new_list[q], q)
+    
+    @ti.kernel
+    def _reset_macroscopic(self, rho: ti.template(), u: ti.template(), solid: ti.template()):
+        """重置巨觀量"""
+        for i, j, k in ti.ndrange(config.NX, config.NY, config.NZ):
+            if solid[i, j, k] > 0.5:
+                continue
+                
+            rho[i, j, k] = 0.0
+            u[i, j, k] = ti.Vector([0.0, 0.0, 0.0])
+            
+    @ti.kernel  
+    def _accumulate_density_momentum(self, f_q: ti.template(), rho: ti.template(),
+                                   u: ti.template(), solid: ti.template(), 
+                                   q: ti.i32):
+        """累積密度和動量 - 單個方向"""
+        for i, j, k in ti.ndrange(config.NX, config.NY, config.NZ):
+            if solid[i, j, k] > 0.5:
+                continue
+                
+            f_val = f_q[i, j, k]
+            rho[i, j, k] += f_val
+            u[i, j, k][0] += f_val * self.ex[q]
+            u[i, j, k][1] += f_val * self.ey[q]  
+            u[i, j, k][2] += f_val * self.ez[q]
+    
+    @ti.kernel
+    def _normalize_velocity(self, rho: ti.template(), u: ti.template(), solid: ti.template()):
+        """正規化速度場"""
+        for i, j, k in ti.ndrange(config.NX, config.NY, config.NZ):
+            if solid[i, j, k] > 0.5:
+                continue
+                
+            rho_val = rho[i, j, k]
+            if rho_val > 1e-12:
+                inv_rho = 1.0 / rho_val
+                u[i, j, k] *= inv_rho
+    
+    @ti.kernel
+    def _single_direction_collision(self, f_q: ti.template(), f_new_q: ti.template(),
+                                  rho: ti.template(), u: ti.template(),
+                                  solid: ti.template(), tau: ti.f32, q: ti.i32):
+        """單個方向的collision計算"""
+        for i, j, k in ti.ndrange(config.NX, config.NY, config.NZ):
+            if solid[i, j, k] > 0.5:
+                f_new_q[i, j, k] = f_q[i, j, k]  # 固體邊界
+                continue
+                
+            rho_val = rho[i, j, k]
+            ux = u[i, j, k][0]
+            uy = u[i, j, k][1] 
+            uz = u[i, j, k][2]
+            
+            # 計算平衡分布函數
+            e_dot_u = self.ex[q]*ux + self.ey[q]*uy + self.ez[q]*uz
+            u_sqr = ux*ux + uy*uy + uz*uz
+            feq = self.w[q] * rho_val * (1.0 + 3.0*e_dot_u + 4.5*e_dot_u*e_dot_u - 1.5*u_sqr)
+            
+            # BGK collision
+            f_old = f_q[i, j, k]
+            f_new_q[i, j, k] = f_old - (f_old - feq) / tau
+    
+    @ti.kernel
+    def _single_direction_streaming(self, f_q: ti.template(), f_new_q: ti.template(), q: ti.i32):
+        """單個方向的streaming計算"""
+        for i, j, k in ti.ndrange(config.NX, config.NY, config.NZ):
+            # 計算來源位置
+            src_i = i - self.ex[q]
+            src_j = j - self.ey[q]
+            src_k = k - self.ez[q]
+            
+            # 邊界檢查
+            if (0 <= src_i < config.NX and 
+                0 <= src_j < config.NY and 
+                0 <= src_k < config.NZ):
+                f_q[i, j, k] = f_new_q[src_i, src_j, src_k]
+            else:
+                # 邊界處理 - 保持原值
+                f_q[i, j, k] = f_new_q[i, j, k]
     
     def estimate_memory_usage(self, nx: int, ny: int, nz: int) -> float:
         """估算Apple Silicon後端記憶體使用量 (GB)"""

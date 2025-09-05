@@ -24,7 +24,7 @@ def test_taichi_init():
 def test_config_import():
     """測試配置模組導入"""
     try:
-        import config.config as config
+        import config
         assert hasattr(config, 'NX')
         assert hasattr(config, 'NY') 
         assert hasattr(config, 'NZ')

@@ -15,6 +15,7 @@
 - 當需要搜尋文件內容時，在shell中使用"ripgrep" (https://github.com/BurntSushi/ripgrep)指令取代grep指令
 - 當我使用"@"指名文件時，使用read工具閱讀
 - 當需要搜尋文件位置＆名字時，在shell中使用"fd" (https://github.com/sharkdp/fd)指令取代find指令
+- 當需要查看專案檔案結構時，在shell中使用"tree"指令
 
 ## 🔬 專案概述
 工業級3D計算流體力學模擬系統，專門用於V60手沖咖啡沖煮過程的科學模擬。
@@ -483,6 +484,7 @@ pour-over/                                                      # 🏗️ 根目
 - 說明檔案請盡可能簡潔明瞭
 - 避免建立過多的markdown文件來描述專案
 - markdown文件可以多使用emoji以及豐富排版來增加豐富度
+- 用字請客觀且中性，不要過度樂觀以及膚淺
 
 ### 程式規則
 - 程式碼以邏輯清晰、精簡、易讀、高效這四點為主

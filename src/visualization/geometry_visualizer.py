@@ -10,10 +10,10 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 from datetime import datetime
 from scipy import stats
-import config.config as config
+import config
 from src.physics.coffee_particles import CoffeeParticleSystem
 from src.physics.filter_paper import FilterPaperSystem
-from src.core.lbm_solver import LBMSolver
+# Note: LBMSolver import removed - geometry visualizer doesn't need core solver
 
 # 設置專業級matplotlib配置
 plt.rcParams['font.sans-serif'] = ['Arial Unicode MS', 'SimHei', 'DejaVu Sans'] 
@@ -109,8 +109,8 @@ class GeometryVisualizer:
             from config.init import initialize_taichi_once
             initialize_taichi_once()
 
-            lbm = LBMSolver()
-            filter_system = FilterPaperSystem(lbm)
+            # FilterPaperSystem初始化 (不需要完整LBM求解器)
+            filter_system = FilterPaperSystem(lbm_solver=None)  # 傳入None作為佔位符
             filter_system.initialize_filter_geometry()
 
             particle_system = CoffeeParticleSystem(max_particles=2000)

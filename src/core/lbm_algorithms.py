@@ -16,7 +16,7 @@ LBM統一算法庫 - 核心數值方法統一實現
 
 import taichi as ti
 import numpy as np
-import config.config as config
+import config
 from typing import Optional, Tuple, Union, Any, Protocol
 from enum import Enum
 
