@@ -7,7 +7,7 @@ CUDA計算後端 - NVIDIA GPU並行優化
 import taichi as ti
 import numpy as np
 import time
-import config
+import config.config
 from typing import Dict, Any, Optional
 from abc import ABC, abstractmethod
 

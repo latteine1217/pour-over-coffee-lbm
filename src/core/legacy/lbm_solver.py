@@ -19,7 +19,7 @@
 from typing import Optional, Tuple, Union, Any
 import taichi as ti
 import numpy as np
-import config
+import config.config
 
 # 導入Apple Silicon優化
 from src.core.apple_silicon_optimizations import apple_optimizer, MetalKernelOptimizer

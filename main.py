@@ -56,7 +56,7 @@ try:
 except ImportError:
     print("❌ UnifiedLBMSolver導入失敗 - 使用舊版求解器")
     try:
-        from src.core.legacy.lbm_solver import LBMSolver as UnifiedLBMSolver
+        from src.core.lbm_solver import LBMSolver as UnifiedLBMSolver
     except ImportError:
         print("❌ 無法導入任何LBM求解器")
         sys.exit(1)
@@ -553,7 +553,7 @@ class CoffeeSimulation:
                 print("   └─ 使用回退方案...")
                 # 回退方案：使用舊版求解器
                 try:
-                    from src.core.legacy.lbm_solver import LBMSolver
+                    from src.core.lbm_solver import LBMSolver
                     raw_solver = LBMSolver()
                     self.solver_type = "舊版LBM (回退)"
                 except ImportError:
@@ -582,7 +582,7 @@ class CoffeeSimulation:
                 raw_solver = UnifiedLBMSolver(preferred_backend='auto')
                 self.solver_type = f"統一LBM (回退-{getattr(raw_solver, 'current_backend', 'auto')})"
             except Exception:
-                from src.core.legacy.lbm_solver import LBMSolver
+                from src.core.lbm_solver import LBMSolver
                 raw_solver = LBMSolver()
                 self.solver_type = "舊版LBM (回退)"
         

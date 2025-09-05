@@ -9,7 +9,7 @@ try:
     import jax
     import jax.numpy as jnp
     from jax import jit, vmap, device_put
-    from jax.config import config as jax_config
+    from jax.config import config.config as jax_config
     JAX_AVAILABLE = True
     
     # 設定Apple Silicon Metal後端
@@ -26,7 +26,7 @@ except ImportError:
 
 import taichi as ti
 import numpy as np
-import config
+import config.config
 from typing import Optional, Union, Tuple
 
 @ti.data_oriented

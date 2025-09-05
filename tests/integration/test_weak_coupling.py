@@ -36,7 +36,7 @@ ti.init(arch=ti.metal)  # 或 ti.cpu
 from src.core.thermal_fluid_coupled import ThermalFluidCoupledSolver, CouplingConfig
 from src.physics.thermal_lbm import ThermalLBM
 from src.core.lbm_solver import LBMSolver
-import config
+import config.config
 
 class TestWeakCoupling:
     """熱流弱耦合測試類"""

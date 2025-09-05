@@ -6,7 +6,7 @@ Apple Silicon計算後端 - Metal GPU深度優化
 
 import taichi as ti
 import numpy as np
-import config
+import config.config
 from typing import Dict, Any, Optional
 from abc import ABC, abstractmethod
 import time

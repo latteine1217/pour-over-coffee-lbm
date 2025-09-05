@@ -22,7 +22,7 @@ import math
 from typing import Tuple, Dict, Any
 from dataclasses import dataclass
 
-import config
+import config.config
 # from src.physics.thermal_properties import ThermalPropertiesDatabase  # 暫時註釋，避免循環導入
 
 @dataclass

@@ -27,7 +27,7 @@ import threading
 from contextlib import contextmanager
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))))
-import config
+import config.config
 
 
 # ===== 錯誤處理系統 =====

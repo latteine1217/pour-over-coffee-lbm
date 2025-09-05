@@ -18,7 +18,7 @@ from dataclasses import dataclass, asdict
 from contextlib import contextmanager
 
 # 導入核心模組
-import config
+import config.config
 from src.core.lbm_solver import LBMSolver
 from src.core.multiphase_3d import MultiphaseFlow3D
 from src.physics.coffee_particles import CoffeeParticleSystem

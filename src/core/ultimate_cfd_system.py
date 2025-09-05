@@ -12,14 +12,14 @@ import os
 # 添加項目根目錄到路徑
 sys.path.append(os.path.join(os.path.dirname(__file__), '../..'))
 
-import config
+import config.config
 import time
 from typing import Optional, Dict, Any
 
 # 導入優化模組
 # 舊版求解器改為從 legacy 路徑導入，保持相容
 from src.core.ultra_optimized_lbm import UltraOptimizedLBMSolver
-from src.core.legacy.cuda_dual_gpu_lbm import CUDADualGPULBMSolver  # NVIDIA P100 * 2 求解器
+from src.core.cuda_dual_gpu_lbm import CUDADualGPULBMSolver  # NVIDIA P100 * 2 求解器
 from jax_hybrid_core import get_hybrid_core
 from src.core.memory_optimizer import get_memory_optimizer
 from src.core.apple_silicon_optimizations import apply_apple_silicon_optimizations

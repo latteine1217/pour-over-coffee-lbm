@@ -6,7 +6,7 @@
 
 import taichi as ti
 import numpy as np
-import config
+import config.config
 from typing import Dict, Any, Optional, Union
 import platform
 import sys

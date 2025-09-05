@@ -17,7 +17,7 @@ LBM統一算法庫單元測試
 import pytest
 import taichi as ti
 import numpy as np
-import config
+import config.config
 from src.core.lbm_algorithms import (
     get_d3q19_weight, get_d3q19_velocity, 
     equilibrium_d3q19_unified, equilibrium_d3q19_safe,

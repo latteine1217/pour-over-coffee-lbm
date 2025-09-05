@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "")))
 import unittest
 import numpy as np
 import taichi as ti
-import config
+import config.config
 from src.core.lbm_solver import LBMSolver
 from src.physics.boundary_conditions import BoundaryConditionManager
 from src.core.numerical_stability import NumericalStabilityMonitor

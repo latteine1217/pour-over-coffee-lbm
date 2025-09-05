@@ -49,7 +49,7 @@ def main():
     
     # 定義import映射關係
     import_mapping = {
-        # 核心模組
+        # 核心模組（短名 → 統一路徑）
         'lbm_solver': 'src.core.lbm_solver',
         'lbm_protocol': 'src.core.lbm_protocol', 
         'multiphase_3d': 'src.core.multiphase_3d',
@@ -60,6 +60,11 @@ def main():
         'ultimate_cfd_system': 'src.core.ultimate_cfd_system',
         'ultra_optimized_lbm': 'src.core.ultra_optimized_lbm',
         'thermal_fluid_coupled': 'src.core.thermal_fluid_coupled',
+        
+        # 核心模組（完整 legacy 路徑 → 統一路徑）
+        'src.core.legacy.lbm_solver': 'src.core.lbm_solver',
+        'src.core.legacy.ultra_optimized_lbm': 'src.core.ultra_optimized_lbm',
+        'src.core.legacy.cuda_dual_gpu_lbm': 'src.core.cuda_dual_gpu_lbm',
         
         # 物理模組
         'temperature_dependent_properties': 'src.physics.temperature_dependent_properties',

@@ -6,7 +6,7 @@ Cache-line對齊、預取優化、統一記憶體池管理
 
 import taichi as ti
 import numpy as np
-import config
+import config.config
 from typing import List, Tuple, Optional
 import gc
 import psutil

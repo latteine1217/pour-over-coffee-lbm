@@ -6,7 +6,7 @@
 
 import taichi as ti
 import numpy as np
-import config
+import config.config
 
 @ti.data_oriented
 class PressureGradientDrive:

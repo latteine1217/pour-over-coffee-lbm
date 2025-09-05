@@ -10,7 +10,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 import numpy as np
 import matplotlib.pyplot as plt
 from src.visualization.enhanced_visualizer import EnhancedVisualizer
-import config
+import config.config
 
 class MockLBMSolver:
     """模擬LBM求解器用於測試"""
