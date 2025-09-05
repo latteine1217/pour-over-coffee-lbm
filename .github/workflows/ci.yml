@@ -62,14 +62,14 @@ jobs:
     - name: Enforce import policies (no legacy paths, no config.config)
       run: |
         set -e
-        echo "Checking for forbidden legacy imports..."
-        if rg -n "from\\s+src\\.core\\.legacy\\.|import\\s+src\\.core\\.legacy\\." -S .; then
+        echo "Checking for forbidden legacy imports (Python sources only, excluding backups)..."
+        if rg -n -t py -g '!backups/**' "from\\s+src\\.core\\.legacy\\.|import\\s+src\\.core\\.legacy\\." -S .; then
           echo "❌ Forbidden legacy imports found" && exit 1
         else
           echo "✅ No legacy imports"
         fi
-        echo "Checking for deprecated config imports..."
-        if rg -n "import\\s+config\\.config(\\s|$)" -S .; then
+        echo "Checking for deprecated config imports (Python sources only, excluding backups)..."
+        if rg -n -t py -g '!backups/**' "^\s*import\\s+config\\.config(\\s|$)" -S .; then
           echo "❌ Deprecated config.config imports found" && exit 1
         else
           echo "✅ No deprecated config.config imports"
