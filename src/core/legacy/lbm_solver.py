@@ -223,22 +223,14 @@ class LBMSolver:
             - Metal GPU SIMD友好 (+100% vectorization)
             - 記憶體頻寬最佳化 (+25% bandwidth)
         """
-        print("  🔧 建立真正SoA分布函數...")
+        print("  🔧 建立分布函數場 (兼容布局)...")
         
-        # 19個獨立的3D場 (真正SoA)
-        self.f = []
-        self.f_new = []
+        # 使用4D場 [Q×NX×NY×NZ]，以支援動態方向索引與現有內核實作
+        self.f = ti.field(dtype=ti.f32, shape=(config.Q_3D, config.NX, config.NY, config.NZ))
+        self.f_new = ti.field(dtype=ti.f32, shape=(config.Q_3D, config.NX, config.NY, config.NZ))
         
-        for q in range(config.Q_3D):
-            # 每個方向獨立的3D場
-            f_q = ti.field(dtype=ti.f32, shape=(config.NX, config.NY, config.NZ))
-            f_new_q = ti.field(dtype=ti.f32, shape=(config.NX, config.NY, config.NZ))
-            
-            self.f.append(f_q)
-            self.f_new.append(f_new_q)
-        
-        print(f"    ✅ 建立{config.Q_3D}個獨立3D場 (真SoA)")
-        print(f"    記憶體布局: {config.Q_3D} × [{config.NX}×{config.NY}×{config.NZ}]")
+        print(f"    ✅ 建立4D分布函數場 [Q×NX×NY×NZ]")
+        print(f"    記憶體布局: [{config.Q_3D}×{config.NX}×{config.NY}×{config.NZ}]")
     
     def _init_macroscopic_fields(self) -> None:
         """
@@ -534,10 +526,10 @@ class LBMSolver:
                 phase_val = self.phase[i, j, k]
                 gravity_force = self._compute_body_force(phase_val)
                 total_force = gravity_force + self.body_force[i, j, k]
+                # 預設為零速度，避免變數未定義
+                u_local = ti.Vector([0.0, 0.0, 0.0])
                 if rho_local > 1e-12:
                     u_local = (mom + 0.5 * total_force) / rho_local
-                else:
-                    u_local = ti.Vector([0.0, 0.0, 0.0])
                 
                 self.u[i, j, k] = u_local
                 self.u_sq[i, j, k] = u_local.norm_sqr()
@@ -949,9 +941,9 @@ class LBMSolver:
                     # 使用預計算的相反方向查找表
                     opp_q = self.opposite_dir[q]
                     # 交換分佈函數
-                    temp = self.f[q, i, j, k]
-                    self.f[q, i, j, k] = self.f[opp_q, i, j, k]
-                    self.f[opp_q, i, j, k] = temp
+                temp = self.f[q, i, j, k]
+                self.f[q, i, j, k] = self.f[opp_q, i, j, k]
+                self.f[opp_q, i, j, k] = temp
     
     @ti.kernel
     def _apply_top_boundary(self):
@@ -1378,13 +1370,13 @@ class LBMSolver:
             u_local = ti.Vector([0.0, 0.0, 0.0])
             
             for q in ti.static(range(config.Q_3D)):
-                rho_local += self.f[q, i, j, k]  # 修正為SoA格式
+                rho_local += self.f[q, i, j, k]
             
             if rho_local > 1e-10:
                 for q in ti.static(range(config.Q_3D)):
                     # 使用已定義的速度向量陣列
                     e_q = ti.Vector([self.cx[q], self.cy[q], self.cz[q]])
-                    u_local += e_q * self.f[q, i, j, k]  # 修正為SoA格式
+                    u_local += e_q * self.f[q, i, j, k]
                 u_local /= rho_local
             
             # 更新巨觀場
@@ -1425,7 +1417,7 @@ class LBMSolver:
                 if (0 <= src_i < config.NX and 
                     0 <= src_j < config.NY and 
                     0 <= src_k < config.NZ):
-                    self.f[q, i, j, k] = self.f_new[q, src_i, src_j, src_k]  # 修正為SoA格式
+                    self.f[q, i, j, k] = self.f_new[q, src_i, src_j, src_k]
                 else:
                     # 邊界處理
                     self.f[q, i, j, k] = self.f_new[q, i, j, k]
