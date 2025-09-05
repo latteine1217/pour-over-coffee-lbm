@@ -9,14 +9,14 @@ try:
     import jax
     import jax.numpy as jnp
     from jax import jit, vmap, device_put
-    from jax.config import config.config as jax_config
+    from jax import config as jax_config
     JAX_AVAILABLE = True
     
     # 設定Apple Silicon Metal後端
     try:
         jax_config.update('jax_platform_name', 'metal')
         print("🍎 JAX Metal後端已啟用")
-    except:
+    except Exception:
         print("⚠️  JAX Metal後端不可用，使用CPU")
         
 except ImportError:
@@ -26,7 +26,7 @@ except ImportError:
 
 import taichi as ti
 import numpy as np
-import config.config
+import config as config  # 使用統一入口，避免相容層警告
 from typing import Optional, Union, Tuple
 
 @ti.data_oriented
