@@ -1,127 +1,30 @@
-# physics_config.py - 物理常數與材料參數配置
 """
-物理常數與材料參數配置
-包含所有流體物性、幾何參數、無量綱數計算
+physics_config.py - 向後相容層（轉發至統一的 config.physics）
 
-與core_config.py分離，專注於物理模型參數
-確保物理參數的一致性和可追溯性
+用途：
+- 保持舊程式碼 `from config.physics_config import ...` 可用。
+- 所有定義均轉發自 `config.physics`（統一物理參數的單一來源）。
+- 提供與 thermal_config 同風格的棄用提醒。
 
 開發：opencode + GitHub Copilot
 """
 
-import math
-import numpy as np
-import sys
-import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# 轉發所有物理參數與函數
+from .physics import *  # noqa: F401,F403
 
-from config.core_config import (
-    NX, NY, NZ, SCALE_LENGTH, SCALE_TIME, SCALE_VELOCITY,
-    CS2, TAU_FLUID, TAU_AIR, CFL_NUMBER
-)
+# 單次告警，提示使用新入口
+_printed_notice = False
 
-# ==============================================
-# 標準溫度與物理常數
-# ==============================================
+def _print_deprecation_once():
+    global _printed_notice
+    if not _printed_notice:
+        try:
+            print("⚠️  Deprecation: 請改用 `from config.physics import ...`，physics_config 已轉為相容層。")
+        except Exception:
+            pass
+        _printed_notice = True
 
-# 標準工作溫度 (°C)
-WATER_TEMP_C = 90.0            # 90°C熱水 (標準手沖溫度)
-AMBIENT_TEMP_C = 25.0          # 環境溫度
-COFFEE_INITIAL_TEMP_C = 25.0   # 咖啡粉初始溫度
-
-# 物理常數
-GRAVITY_PHYS = 9.81            # m/s² (重力加速度)
-STEFAN_BOLTZMANN = 5.67e-8     # W/(m²·K⁴) (Stefan-Boltzmann常數)
-
-# ==============================================
-# 流體物性參數 (90°C水 & 20°C空氣)
-# ==============================================
-
-# 90°C熱水物理性質 (標準參考)
-WATER_DENSITY_90C = 965.3              # kg/m³
-WATER_VISCOSITY_90C = 3.15e-7          # m²/s (運動黏滯度)
-WATER_THERMAL_CONDUCTIVITY = 0.675     # W/(m·K)
-WATER_HEAT_CAPACITY = 4205             # J/(kg·K)
-WATER_THERMAL_DIFFUSIVITY = 1.66e-7    # m²/s
-WATER_THERMAL_EXPANSION = 6.95e-4      # 1/K
-WATER_SURFACE_TENSION = 0.0728         # N/m
-
-# 20°C空氣物理性質
-AIR_DENSITY_20C = 1.204                # kg/m³
-AIR_VISCOSITY_20C = 1.516e-5           # m²/s
-AIR_THERMAL_CONDUCTIVITY = 0.0257      # W/(m·K)
-AIR_HEAT_CAPACITY = 1005               # J/(kg·K)
-AIR_THERMAL_DIFFUSIVITY = 2.12e-5      # m²/s
-AIR_THERMAL_EXPANSION = 3.43e-3        # 1/K
-
-# 咖啡固體物理性質
-COFFEE_BEAN_DENSITY = 1200             # kg/m³
-COFFEE_THERMAL_CONDUCTIVITY = 0.3      # W/(m·K)
-COFFEE_HEAT_CAPACITY = 1800            # J/(kg·K)
-COFFEE_THERMAL_DIFFUSIVITY = 1.39e-7   # m²/s
-COFFEE_THERMAL_EXPANSION = 1.5e-5      # 1/K
-
-# ==============================================
-# V60幾何參數 (真實規格)
-# ==============================================
-
-# V60濾杯尺寸 (Hario V60-02標準)
-CUP_HEIGHT = 0.085                     # m (8.5 cm)
-TOP_RADIUS = 0.058                     # m (11.6 cm直徑)
-BOTTOM_RADIUS = 0.010                  # m (2 cm出水孔)
-
-# 咖啡床參數
-COFFEE_POWDER_MASS = 0.02              # 20g
-COFFEE_POROSITY = 0.45                 # 孔隙率
-COFFEE_PARTICLE_DIAMETER = 6.5e-4      # 0.65mm
-COFFEE_PARTICLE_RADIUS = COFFEE_PARTICLE_DIAMETER / 2
-
-# 注水參數
-POUR_RATE_ML_S = 4.0                   # 4 ml/s
-POUR_RATE_M3_S = POUR_RATE_ML_S * 1e-6
-TOTAL_WATER_ML = 320                   # 320ml
-BREWING_TIME_SECONDS = 140             # 2:20
-
-# 注水幾何
-POUR_HEIGHT_CM = 12.5                  # 注水高度
-INLET_DIAMETER_M = 0.005               # 入水直徑 (0.5 cm)
-NOZZLE_DIAMETER_M = 0.005              # 噴嘴直徑上限
-
-# ==============================================
-# 尺度轉換與無量綱化
-# ==============================================
-
-# 特徵尺度選擇
-L_CHAR = CUP_HEIGHT                    # 特徵長度 (V60高度)
-U_CHAR = 0.02                          # 特徵速度 (2 cm/s)
-T_CHAR = L_CHAR / U_CHAR               # 特徵時間
-RHO_CHAR = WATER_DENSITY_90C           # 特徵密度
-NU_CHAR = WATER_VISCOSITY_90C          # 特徵黏滯度
-
-# 密度比 (相對於水)
-RHO_WATER = 1.0                        # 參考密度
-RHO_AIR = AIR_DENSITY_20C / WATER_DENSITY_90C    # 真實密度比 (~0.00125)
-
-# 格子單位下的物性參數
-NU_WATER_LU = WATER_VISCOSITY_90C * SCALE_TIME / (SCALE_LENGTH**2)
-NU_AIR_LU = AIR_VISCOSITY_20C * SCALE_TIME / (SCALE_LENGTH**2)
-
-# 驗證鬆弛時間一致性 (與core_config一致)
-TAU_WATER_CALCULATED = NU_WATER_LU / CS2 + 0.5
-TAU_AIR_CALCULATED = NU_AIR_LU / CS2 + 0.5
-
-# 使用core_config的安全值，但驗證一致性
-if abs(TAU_WATER_CALCULATED - TAU_FLUID) > 0.1:
-    print(f"⚠️  水相鬆弛時間不一致: 計算值{TAU_WATER_CALCULATED:.3f} vs 核心值{TAU_FLUID:.3f}")
-
-if abs(TAU_AIR_CALCULATED - TAU_AIR) > 0.1:
-    print(f"⚠️  氣相鬆弛時間不一致: 計算值{TAU_AIR_CALCULATED:.3f} vs 核心值{TAU_AIR:.3f}")
-
-# ==============================================
-# 重力與表面張力
-# ==============================================
-
-# 重力轉換
+_print_deprecation_once()
 GRAVITY_LU_FULL = GRAVITY_PHYS * (SCALE_TIME**2) / SCALE_LENGTH
 GRAVITY_STRENGTH_FACTOR = 0.5          # 50%重力強度 (穩定性與物理效果平衡)
 GRAVITY_LU = GRAVITY_LU_FULL * GRAVITY_STRENGTH_FACTOR

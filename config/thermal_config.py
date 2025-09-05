@@ -33,6 +33,18 @@ except NameError:
         from .thermal import get_thermal_summary as get_thermal_config_summary  # type: ignore
     except Exception:
         pass
+
+# 與舊版相容：定義每相的熱CFL數（由統一熱傳參數推導）
+try:
+    CFL_THERMAL_WATER = ALPHA_WATER_LU / CS2_THERMAL  # type: ignore
+    CFL_THERMAL_AIR = ALPHA_AIR_LU / CS2_THERMAL      # type: ignore
+    CFL_THERMAL_COFFEE = ALPHA_COFFEE_LU / CS2_THERMAL  # type: ignore
+except Exception:
+    # 若匯入失敗則提供保守預設，並避免中斷
+    CFL_THERMAL_WATER = 0.0  # type: ignore
+    CFL_THERMAL_AIR = 0.0    # type: ignore
+    CFL_THERMAL_COFFEE = 0.0 # type: ignore
+
 MAX_TEMP_CHANGE_RATE = 5.0             # °C/s (最大溫度變化率)
 
 # 收斂判定
